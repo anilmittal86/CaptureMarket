@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.analytics import sector_summary
 from src.data_loader import get_data
-from src.ui import inject_css
+from src.ui import inject_css, insight_banner
 
 st.set_page_config(page_title="Sectoral | CaptureMarket", page_icon=None, layout="wide")
 inject_css()
@@ -31,6 +31,18 @@ try:
 except FileNotFoundError as e:
     st.error(str(e))
     st.stop()
+
+sec = sector_summary(df)
+if len(sec):
+    top = sec.iloc[0]
+    weak_n = int((sec["% Positive (1Y)"] < 50).sum())
+    tone = "pos" if top["Median 1Y Return (%)"] > 0 else "neg"
+    insight_banner(
+        f"<b>{top.name}</b> leads with a median 1Y return of <b>{top['Median 1Y Return (%)']:+.1f}%</b> "
+        f"({int(top['Companies'])} companies). <b>{weak_n} of {len(sec)}</b> sectors have negative breadth "
+        "(fewer than half their stocks positive over 1Y).",
+        tone,
+    )
 
 # --- dispersion view -------------------------------------------------------
 metric = st.radio(
@@ -68,7 +80,6 @@ st.caption(f"Sectors ordered by median {metric}. Boxes span p25-p75; whiskers 1.
 st.divider()
 
 # --- sector table (medians + breadth) ---------------------------------------
-sec = sector_summary(df)
 st.markdown('<div class="section-title">All Sectors (medians & breadth)</div>', unsafe_allow_html=True)
 st.dataframe(
     sec.reset_index(),

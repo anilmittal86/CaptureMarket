@@ -129,6 +129,11 @@ if effective_quads:
 log_mode = st.radio("P/E scale", ["Log P/E", "Linear P/E"], horizontal=True, label_visibility="collapsed")
 log_x = log_mode == "Log P/E"
 
+st.caption(
+    f"**{len(plotted)} / {len(df_full)}** companies plotted · bubble size = {SIZE_OPTIONS[cfg['size']][1]} · "
+    "quadrant boundaries & percentiles always use the FULL universe"
+)
+
 # --- the market map -----------------------------------------------------------
 fig = build_bubble_figure(
     plotted,
