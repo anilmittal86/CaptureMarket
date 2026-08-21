@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Generated data (run scripts/fetch_data.py to regenerate)
+data/*.csv
+
+# Secrets
+.streamlit/secrets.toml
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
