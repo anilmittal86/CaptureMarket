@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 from src.analytics import QUADRANT_COLORS, QUADRANTS, assign_quadrants, percentile_rank, quadrant_summary, universe_medians
 from src.data_loader import get_data
 from src.metrics import COLOR_OPTIONS, DEFAULT_CHART_CONFIG, METRICS, SIZE_OPTIONS, TOOLTIP_FIELDS, fmt_metric
-from src.ui import inject_css, kpi_card
+from src.ui import cr_fmt, inject_css, kpi_card
 from src.visualization import build_bubble_figure
 
 st.set_page_config(page_title="Micro | CaptureMarket", page_icon=None, layout="wide")
@@ -57,10 +57,15 @@ if q.strip():
         df_full["Company"].astype(str).str.lower().str.contains(ql, na=False)
         | df_full["NSE Symbol"].astype(str).str.lower().str.contains(ql, na=False)
     ]
-    options = [f"{r['Company']} ({r['NSE Symbol']})" for _, r in matches.iterrows()]
+    def _opt(r: pd.Series) -> str:
+        mc = r.get("Market Cap (Cr)")
+        mc_s = f" | {mc:,.0f} Cr" if pd.notna(mc) else ""
+        return f"{r['Company']} ({r['NSE Symbol']}){mc_s}"
+
+    options = [_opt(r) for _, r in matches.iterrows()]
     pick = st.selectbox(f"{len(matches)} match(es)", ["-- select to locate on chart --"] + options[:50])
-    if pick.startswith("--") is False and "(" in pick:
-        ss.selected_symbol = pick.rsplit("(", 1)[1].rstrip(")")
+    if not pick.startswith("--") and "(" in pick:
+        ss.selected_symbol = pick.split("(")[1].split(")")[0]
 
 # --- sidebar filters ------------------------------------------------------
 st.sidebar.header("Filters")
@@ -111,18 +116,20 @@ plotted["Quadrant"] = assign_quadrants(plotted, x_col, y_col, med_x, med_y)
 
 # --- summary strip (universe-level numbers) --------------------------------
 ret_all = df_full["1Y Return (%)"]
-strip = st.columns(6)
+strip = st.columns(7)
 with strip[0]:
     kpi_card("Plotted", f"{len(plotted)} / {len(df_full)}", "companies positioned")
 with strip[1]:
-    kpi_card("Universe Median P/E", fmt_metric(x_col, med_x) if cfg["x"] == "pe" else f"{med_x:,.1f}")
+    kpi_card("Universe Mkt Cap", cr_fmt(float(df_full["Market Cap (Cr)"].sum())))
 with strip[2]:
-    kpi_card("Universe Median EPS G 3Y", f"{med_y:+.1f}%")
+    kpi_card("Universe Median P/E", fmt_metric(x_col, med_x) if cfg["x"] == "pe" else f"{med_x:,.1f}")
 with strip[3]:
-    kpi_card("Positive 1Y", f"{(ret_all > 0).mean() * 100:.0f}%", "of universe", "pos")
+    kpi_card("Universe Median EPS G 3Y", f"{med_y:+.1f}%")
 with strip[4]:
-    kpi_card("Negative 1Y", f"{(ret_all < 0).mean() * 100:.0f}%", "of universe", "neg")
+    kpi_card("Positive 1Y", f"{(ret_all > 0).mean() * 100:.0f}%", "of universe", "pos")
 with strip[5]:
+    kpi_card("Negative 1Y", f"{(ret_all < 0).mean() * 100:.0f}%", "of universe", "neg")
+with strip[6]:
     avg_ret = ret_all.mean()
     kpi_card("Avg 1Y Return", f"{avg_ret:+.1f}%", "", "pos" if avg_ret > 0 else "neg")
 
@@ -192,13 +199,16 @@ if sym:
                 ss.selected_symbol = None
                 st.rerun()
 
-        m1, m2, m3 = st.columns(3)
+        m1, m2, m3, m4 = st.columns(4)
         with m1:
             kpi_card("P/E", fmt_metric("P/E", row.get("P/E")))
         with m2:
             kpi_card("EPS Growth 3Y", fmt_metric("EPS Growth 3Y (%)", row.get("EPS Growth 3Y (%)")))
         with m3:
             kpi_card("1Y Return", fmt_metric("1Y Return (%)", row.get("1Y Return (%)")))
+        with m4:
+            mc = row.get("Market Cap (Cr)")
+            kpi_card("Market Cap", cr_fmt(float(mc)) if pd.notna(mc) else "N/A")
 
         p1, p2, p3 = st.columns(3)
         with p1:
@@ -226,3 +236,31 @@ if sym:
 
         if sym not in plotted["NSE Symbol"].values:
             st.caption("Selected stock is hidden by current filters - clear filters to see it on the map.")
+
+# --- companies in the selected quadrant(s) -----------------------------------
+if effective_quads:
+    st.divider()
+    n_q = len(effective_quads)
+    st.markdown(
+        f'<div class="section-title">Companies in selected quadrant{"s" if n_q > 1 else ""} ({len(plotted)})</div>',
+        unsafe_allow_html=True,
+    )
+    q_cols = [
+        "Company", "NSE Symbol", "Sector", "Industry", "Market Cap (Cr)",
+        "P/E", "EPS Growth 3Y (%)", "Revenue Growth (%)", "ROE (%)",
+        "1Y Return (%)", "Quadrant",
+    ]
+    q_tbl = plotted.sort_values("Market Cap (Cr)", ascending=False)
+    st.dataframe(
+        q_tbl[q_cols],
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "Market Cap (Cr)": st.column_config.NumberColumn(format="comma"),
+            "P/E": st.column_config.NumberColumn(format="%.1fx"),
+            "EPS Growth 3Y (%)": st.column_config.NumberColumn(format="%+.1f%%"),
+            "Revenue Growth (%)": st.column_config.NumberColumn(format="%+.1f%%"),
+            "ROE (%)": st.column_config.NumberColumn(format="%.1f%%"),
+            "1Y Return (%)": st.column_config.NumberColumn(format="%+.1f%%"),
+        },
+    )

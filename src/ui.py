@@ -51,3 +51,9 @@ def sign_class(value: float) -> str:
     if value is None:
         return ""
     return "pos" if value > 0 else ("neg" if value < 0 else "")
+
+
+def cr_fmt(v: float) -> str:
+    """Format market cap in Crores, switching to Lakh Crore when large."""
+    lakh_cr = v / 1e5
+    return f"{lakh_cr:,.1f} L Cr" if lakh_cr >= 1 else f"{v:,.0f} Cr"

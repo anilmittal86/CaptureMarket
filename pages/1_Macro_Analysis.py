@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.analytics import macro_summary
 from src.data_loader import get_data
-from src.ui import inject_css, kpi_card, sign_class
+from src.ui import cr_fmt, inject_css, kpi_card, sign_class
 
 st.set_page_config(page_title="Macro | CaptureMarket", page_icon=None, layout="wide")
 inject_css()
@@ -27,11 +27,6 @@ except FileNotFoundError as e:
     st.stop()
 
 s = macro_summary(df)
-
-
-def cr_fmt(v: float) -> str:
-    lakh_cr = v / 1e5
-    return f"{lakh_cr:,.1f} L Cr" if lakh_cr >= 1 else f"{v:,.0f} Cr"
 
 
 # --- KPI cards -----------------------------------------------------------

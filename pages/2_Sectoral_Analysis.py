@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.analytics import sector_summary
 from src.data_loader import get_data
-from src.ui import inject_css, kpi_card
+from src.ui import cr_fmt, inject_css, kpi_card
 from src.visualization import build_bubble_figure, sector_hover_fields
 
 st.set_page_config(page_title="Sectoral | CaptureMarket", page_icon=None, layout="wide")
@@ -68,11 +68,12 @@ with c_side:
                  value_class="pos" if row["Avg 1Y Return (%)"] > 0 else "neg")
     heaviest = sec.iloc[0]
     kpi_card("Heaviest Sector", str(heaviest.name), f"{heaviest['Weight (%)']:.1f}% weight | {int(heaviest['Companies'])} companies")
+    kpi_card("Sector Universe Mkt Cap", cr_fmt(float(sec["Market Cap (Cr)"].sum())), f"across {len(sec)} sectors")
 
 # --- sector table --------------------------------------------------------
 st.markdown('<div class="section-title">All Sectors</div>', unsafe_allow_html=True)
 st.dataframe(
-    sec,
+    sec.reset_index(),  # sector name as a real column (hide_index would hide it otherwise)
     hide_index=True,
     width="stretch",
     column_config={
