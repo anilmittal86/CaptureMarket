@@ -20,6 +20,7 @@ NUMERIC_COLUMNS = [
     "5Y CAGR (%)",
     "FII Holding Change (%)",
     "DII Holding Change (%)",
+    "Avg Daily Turnover (Cr)",
 ]
 
 
@@ -29,10 +30,10 @@ def load_data(path: Path = DATA_PATH) -> pd.DataFrame:
             f"Data file not found: {path}. Run `python scripts/fetch_data.py` first."
         )
     df = pd.read_csv(path)
-    for col in NUMERIC_COLUMNS:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-    df[NUMERIC_COLUMNS] = df[NUMERIC_COLUMNS].replace([np.inf, -np.inf], np.nan)
+    present = [c for c in NUMERIC_COLUMNS if c in df.columns]
+    for col in present:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df[present] = df[present].replace([np.inf, -np.inf], np.nan)
     return df
 
 

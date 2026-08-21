@@ -114,36 +114,12 @@ elif ret_mode == "Negative return":
 plotted = view.dropna(subset=[x_col, y_col]).copy()
 plotted["Quadrant"] = assign_quadrants(plotted, x_col, y_col, med_x, med_y)
 
-# --- summary strip (universe-level numbers) --------------------------------
-ret_all = df_full["1Y Return (%)"]
-strip = st.columns(7)
-with strip[0]:
-    kpi_card("Plotted", f"{len(plotted)} / {len(df_full)}", "companies positioned")
-with strip[1]:
-    kpi_card("Universe Mkt Cap", cr_fmt(float(df_full["Market Cap (Cr)"].sum())))
-with strip[2]:
-    kpi_card("Universe Median P/E", fmt_metric(x_col, med_x) if cfg["x"] == "pe" else f"{med_x:,.1f}")
-with strip[3]:
-    kpi_card("Universe Median EPS G 3Y", f"{med_y:+.1f}%")
-with strip[4]:
-    kpi_card("Positive 1Y", f"{(ret_all > 0).mean() * 100:.0f}%", "of universe", "pos")
-with strip[5]:
-    kpi_card("Negative 1Y", f"{(ret_all < 0).mean() * 100:.0f}%", "of universe", "neg")
-with strip[6]:
-    avg_ret = ret_all.mean()
-    kpi_card("Avg 1Y Return", f"{avg_ret:+.1f}%", "", "pos" if avg_ret > 0 else "neg")
-
-# --- quadrant summary (click rows to filter) --------------------------------
+# --- quadrant selection state (the widget itself renders below the chart) ----
 qs = quadrant_summary(plotted)
-quad_event = st.dataframe(
-    qs,
-    hide_index=True,
-    width="stretch",
-    on_select="rerun",
-    selection_mode="multi-row",
-    key="quadrant_table",
-)
-rows_sel = quad_event.get("selection", {}).get("rows", []) if isinstance(quad_event, dict) else []
+rows_sel = []
+if isinstance(st.session_state.get("quadrant_table"), dict):
+    rows_sel = st.session_state["quadrant_table"].get("selection", {}).get("rows", []) or []
+rows_sel = [r for r in rows_sel if isinstance(r, int) and 0 <= r < len(qs)]
 table_quads = {qs.iloc[r]["Quadrant"] for r in rows_sel}
 effective_quads = set(quad_sidebar) | table_quads
 if effective_quads:
@@ -237,6 +213,18 @@ if sym:
         if sym not in plotted["NSE Symbol"].values:
             st.caption("Selected stock is hidden by current filters - clear filters to see it on the map.")
 
+# --- quadrant summary (below the chart; click row(s) to filter) ---------------
+st.divider()
+st.markdown('<div class="section-title">Quadrants - click row(s) to filter the map</div>', unsafe_allow_html=True)
+st.dataframe(
+    qs,
+    hide_index=True,
+    width="stretch",
+    on_select="rerun",
+    selection_mode="multi-row",
+    key="quadrant_table",
+)
+
 # --- companies in the selected quadrant(s) -----------------------------------
 if effective_quads:
     st.divider()
@@ -256,7 +244,7 @@ if effective_quads:
         hide_index=True,
         width="stretch",
         column_config={
-            "Market Cap (Cr)": st.column_config.NumberColumn(format="comma"),
+            "Market Cap (Cr)": st.column_config.NumberColumn(format="%.0f"),
             "P/E": st.column_config.NumberColumn(format="%.1fx"),
             "EPS Growth 3Y (%)": st.column_config.NumberColumn(format="%+.1f%%"),
             "Revenue Growth (%)": st.column_config.NumberColumn(format="%+.1f%%"),

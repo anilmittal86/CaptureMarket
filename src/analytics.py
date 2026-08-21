@@ -85,20 +85,27 @@ def macro_summary(df: pd.DataFrame) -> dict:
 
 
 def sector_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-sector stats built on MEDIANS and breadth - averages are misleading
+    when intra-sector return dispersion is wide."""
     g = df.groupby("Sector", dropna=False)
+
+    def iqr(s: pd.Series) -> float:
+        return float(s.quantile(0.75) - s.quantile(0.25)) if s.notna().any() else np.nan
+
     out = pd.DataFrame(
         {
             "Companies": g.size(),
             "Market Cap (Cr)": g["Market Cap (Cr)"].sum(),
             "Median P/E": g["P/E"].median(),
             "Median EPS Growth 3Y (%)": g["EPS Growth 3Y (%)"].median(),
-            "Avg 1Y Return (%)": g["1Y Return (%)"].mean(),
-            "Avg 3Y CAGR (%)": g["3Y CAGR (%)"].mean(),
+            "Median 1Y Return (%)": g["1Y Return (%)"].median(),
+            "% Positive (1Y)": g["1Y Return (%)"].apply(lambda s: (s > 0).mean() * 100 if s.notna().any() else np.nan),
+            "1Y Return IQR (pp)": g["1Y Return (%)"].apply(iqr),
         }
     )
     total_cap = out["Market Cap (Cr)"].sum()
     out["Weight (%)"] = out["Market Cap (Cr)"] / total_cap * 100 if total_cap else np.nan
-    return out.sort_values("Market Cap (Cr)", ascending=False)
+    return out.sort_values("Median 1Y Return (%)", ascending=False)
 
 
 def quadrant_summary(df_plotted: pd.DataFrame) -> pd.DataFrame:

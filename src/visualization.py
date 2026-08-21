@@ -167,19 +167,3 @@ def build_bubble_figure(
 
     # Keep genuine outliers: no range clipping is applied anywhere above.
     return fig
-
-
-def sector_hover_fields(sector_df: pd.DataFrame) -> list:
-    """Tooltip fields for the sector-level map."""
-    fields = [("Sector", "Company", None)]
-    for label, column in [
-        ("Companies", "Companies"),
-        ("Market Cap Weight", "Weight (%)"),
-        ("Median P/E", "P/E"),
-        ("Median EPS Growth 3Y", "EPS Growth 3Y (%)"),
-        ("Avg 1Y Return", "Avg 1Y Return (%)"),
-        ("Avg 3Y CAGR", "Avg 3Y CAGR (%)"),
-    ]:
-        if column in sector_df.columns and sector_df[column].notna().any():
-            fields.append((label, column, "{:.2f}"))
-    return fields

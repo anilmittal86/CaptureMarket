@@ -67,6 +67,7 @@ def main() -> None:
             "5Y CAGR (%)": np.nan,
             "FII Holding Change (%)": np.nan,
             "DII Holding Change (%)": np.nan,
+            "Avg Daily Turnover (Cr)": np.nan,
         }
         try:
             stock = yf.Ticker(ticker)
@@ -77,6 +78,9 @@ def main() -> None:
             ret_1y = ((cmp_price / hist["Close"].iloc[-252] - 1) * 100) if len(hist) >= 252 else np.nan
             ret_3y = (((cmp_price / hist["Close"].iloc[-756]) ** (1 / 3) - 1) * 100) if len(hist) >= 756 else np.nan
             ret_5y = (((cmp_price / hist["Close"].iloc[0]) ** (1 / 5) - 1) * 100) if len(hist) >= 1260 else np.nan
+
+            turnover = (hist["Volume"] * hist["Close"]).tail(252)
+            avg_turnover = round(float(turnover.mean()) / 1e7, 2) if not turnover.empty else np.nan
 
             base.update({
                 "Industry": info.get("industry", "N/A"),
@@ -92,6 +96,7 @@ def main() -> None:
                 "5Y CAGR (%)": round(ret_5y, 2),
                 "FII Holding Change (%)": np.nan,
                 "DII Holding Change (%)": np.nan,
+                "Avg Daily Turnover (Cr)": avg_turnover,
             })
         except Exception as e:
             print(f"Failed pulling {symbol}: {e}")

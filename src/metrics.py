@@ -42,11 +42,7 @@ SIZE_OPTIONS = {
 COLOR_OPTIONS = {
     "ret_1y_sign": ("1Y Return (%)", "1Y Return direction"),
     "ret_3y_sign": ("3Y CAGR (%)", "3Y CAGR direction"),
-    "avg_ret_1y_sign": ("Avg 1Y Return (%)", "Avg 1Y Return direction"),
 }
-
-# Sector-aggregate candidates (used by the sectoral market map)
-SIZE_OPTIONS["avg_ret_1y_abs"] = ("Avg 1Y Return (%)", "|Avg 1Y Return|", True)
 
 DEFAULT_CHART_CONFIG = {
     "x": "pe",
@@ -60,6 +56,7 @@ TOOLTIP_FIELDS = [
     ("Company", "Company", None),
     ("NSE Symbol", "NSE Symbol", None),
     ("Market Cap", "Market Cap (Cr)", METRICS["mktcap"].fmt),
+    ("Avg Daily Turnover", "Avg Daily Turnover (Cr)", "{:,.1f} Cr"),
     ("P/E", "P/E", METRICS["pe"].fmt),
     ("EPS Growth 1Y", "EPS Growth 1Y (%)", METRICS["eps_g_1y"].fmt),
     ("EPS Growth 3Y", "EPS Growth 3Y (%)", METRICS["eps_g_3y"].fmt),
