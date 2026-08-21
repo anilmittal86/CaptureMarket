@@ -68,6 +68,7 @@ To re-point the chart at different metrics, edit `DEFAULT_CHART_CONFIG` in
 
 ## Roadmap
 
+- Separate the data layer from the app (dedicated data service / scheduled refresh, instead of a committed CSV snapshot)
 - P/B, EV/EBITDA, PEG columns (registry already supports them once present in the CSV)
 - ROCE derivation and FII/DII holding-change tracking
 - Other index universes (Nifty 50, Midcap 150) via the same pipeline
