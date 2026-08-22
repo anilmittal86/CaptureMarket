@@ -42,12 +42,12 @@ else:
 
 st.divider()
 
-c1, c2, c3 = st.columns(3)
+c1, c2, c3, c4 = st.columns(4)
 with c1:
     st.markdown("#### Macro Analysis")
     st.markdown(
-        "Market-wide KPIs: median P/E, earnings growth, return distributions, "
-        "and top/bottom performers."
+        "The Market Scorecard: does growth justify valuations at your required return? "
+        "Valuation & growth heroes, quadrant tiles, second-order context."
     )
     st.page_link("pages/1_Macro_Analysis.py", label="Open Macro", icon=None)
 with c2:
@@ -64,6 +64,13 @@ with c3:
         "|1Y return|, color = direction, with search, filters and percentiles."
     )
     st.page_link("pages/3_Micro_Analysis.py", label="Open Micro", icon=None)
+with c4:
+    st.markdown("#### Guide")
+    st.markdown(
+        "What every number means: P/E, earnings yield, required return, "
+        "margin of safety, quadrants - in plain language."
+    )
+    st.page_link("pages/4_Guide.py", label="Open Guide", icon=None)
 
 st.divider()
 st.caption("Data source: NSE Index Constituent list + Yahoo Finance. For research/education only.")

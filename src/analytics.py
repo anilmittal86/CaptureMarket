@@ -6,6 +6,15 @@ stock universe and must remain unaffected by any user-applied filters.
 import numpy as np
 import pandas as pd
 
+from src.config import INFLATION, REQUIRED_RETURN, RISK_FREE_RATE
+
+PE_COL = "P/E"
+PB_COL = "P/B"
+EPS_G3_COL = "EPS Growth 3Y (%)"
+PROFIT_G1_COL = "Profit Growth 1Y (%)"
+PROFIT_G3_COL = "Profit Growth 3Y (%)"
+REV_G_COL = "Revenue Growth (%)"
+
 QUADRANTS = [
     "Growth + Value",
     "Growth + Premium",
@@ -122,6 +131,16 @@ def quadrant_summary(df_plotted: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def quadrant_counts(df: pd.DataFrame) -> dict[str, int]:
+    """Company count per quadrant on the FULL universe (P/E vs EPS G3 medians)."""
+    if PE_COL not in df.columns or EPS_G3_COL not in df.columns:
+        return {q: 0 for q in QUADRANTS}
+    med_x, med_y = universe_medians(df, PE_COL, EPS_G3_COL)
+    assigned = assign_quadrants(df, PE_COL, EPS_G3_COL, med_x, med_y)
+    counts = assigned.value_counts().to_dict()
+    return {q: int(counts.get(q, 0)) for q in QUADRANTS}
+
+
 # ===========================================================================
 # Insight engine: every number gets a verdict derived from the distribution.
 # ===========================================================================
@@ -136,34 +155,137 @@ def _breadth_verdict(pct_pos: float) -> tuple[str, str]:
     return "Weak", "neg"
 
 
+def _median_pe_pos(df: pd.DataFrame) -> tuple[float, int, int]:
+    """Median P/E over positive-P/E names plus valid and loss-making counts."""
+    pe = df[PE_COL].dropna()
+    pe_pos = pe[pe > 0]
+    return (float(pe_pos.median()) if len(pe_pos) else np.nan), len(pe), len(df) - len(pe)
+
+
+def market_verdict(df: pd.DataFrame) -> dict:
+    """Top-of-page answer: does growth justify valuations at the required
+    return, and is there a margin of safety?
+
+    Math: expected return ~ EarningsYield + perpetual EPS growth. Needed
+    growth = REQUIRED_RETURN - EY. Margin of safety is expressed as the gap
+    between the P/E the required return implies at actual growth (fair P/E)
+    and today's P/E.
+    """
+    med_pe, _, loss_making = _median_pe_pos(df)
+    out = {"available": False}
+    if np.isnan(med_pe) or med_pe <= 0:
+        return out
+
+    ey = 100.0 / med_pe
+    needed = REQUIRED_RETURN - ey
+    eps3 = df[EPS_G3_COL].dropna() if EPS_G3_COL in df.columns else pd.Series(dtype=float)
+    profit3 = df[PROFIT_G3_COL].dropna() if PROFIT_G3_COL in df.columns else pd.Series(dtype=float)
+    actual_src = "EPS 3-yr CAGR" if len(eps3) >= len(profit3) and len(eps3) else ("profit 3-yr CAGR" if len(profit3) else "")
+    base = eps3 if len(eps3) >= len(profit3) and len(eps3) else profit3
+    if base.empty or np.isnan(needed):
+        return out
+    actual = float(base.median())
+
+    expected = ey + actual
+    buffer = expected - REQUIRED_RETURN
+    fair_pe = 100.0 / (REQUIRED_RETURN - actual) if REQUIRED_RETURN > actual else np.inf
+
+    if buffer >= 2:
+        tier, headline, tone = (
+            "justified",
+            f"GROWTH JUSTIFIES VALUATIONS - with a margin of safety",
+            "pos",
+        )
+        if np.isfinite(fair_pe):
+            mos_line = (
+                f"At current growth a {REQUIRED_RETURN:.0f}% return tolerates a P/E up to "
+                f"{fair_pe:.1f}x vs {med_pe:.1f}x today - prices could rise "
+                f"{(fair_pe / med_pe - 1) * 100:.0f}% and still deliver."
+            )
+        else:
+            mos_line = (
+                f"Growth alone ({actual:+.1f}%) already exceeds your {REQUIRED_RETURN:.0f}% bar before "
+                f"counting the earnings yield - by this measure valuation risk is low."
+            )
+    elif buffer >= -2:
+        tier, headline, tone = "full", "FULLY PRICED - NO MARGIN OF SAFETY", "warn"
+        mos_line = (
+            f"A {REQUIRED_RETURN:.0f}% return needs EPS to compound ~{needed:.1f}%/yr forever; "
+            f"the actual 3-yr pace ({actual:+.1f}%) nearly matches - zero cushion for disappointment."
+        )
+    else:
+        tier, headline, tone = "shortfall", "GROWTH DOES NOT JUSTIFY VALUATIONS", "neg"
+        shortfall = REQUIRED_RETURN - expected
+        price_cut = (1 - fair_pe / med_pe) * 100 if np.isfinite(fair_pe) else np.nan
+        cut_txt = f", or prices would need to fall ~{price_cut:.0f}%" if np.isfinite(fair_pe) else ""
+        mos_line = (
+            f"Growth falls ~{abs(shortfall):.1f} pp short of what {med_pe:.1f}x demands - "
+            f"EPS must accelerate{cut_txt}."
+        )
+
+    sentence = (
+        f"Your required return is <b>{REQUIRED_RETURN:.0f}%</b>. At a median <b>{med_pe:.1f}x</b> P/E "
+        f"(earnings yield <b>{ey:.1f}%</b>), that demands <b>~{needed:.1f}%/yr</b> EPS growth forever. "
+        f"The universe's actual {actual_src}: <b>{actual:+.1f}%</b>."
+    )
+    out.update(
+        {
+            "available": True,
+            "tier": tier,
+            "headline": headline,
+            "tone": tone,
+            "sentence": sentence,
+            "mos_line": mos_line,
+            "median_pe": med_pe,
+            "ey": ey,
+            "needed": needed,
+            "actual": actual,
+            "expected": expected,
+            "buffer": buffer,
+            "fair_pe": fair_pe,
+            "loss_making": loss_making,
+            "required_return": REQUIRED_RETURN,
+            "risk_free": RISK_FREE_RATE,
+        }
+    )
+    return out
+
+
 def market_regime(df: pd.DataFrame) -> list[dict]:
-    """One verdict per lens for the top-of-page strip."""
+    """One verdict per lens for the second-order strip."""
     ret = df["1Y Return (%)"]
     pct_pos = float((ret > 0).mean() * 100)
     breadth_v, breadth_t = _breadth_verdict(pct_pos)
 
-    eps = df["EPS Growth 3Y (%)"]
-    valid_eps = int(eps.notna().sum())
-    eps_pos_pct = float((eps > 0).mean() * 100) if valid_eps else np.nan
-    growth_v, growth_t = _breadth_verdict(eps_pos_pct) if valid_eps else ("Unknown", "neutral")
-
-    pe = df["P/E"].dropna()
-    pe_pos = pe[pe > 0]
-    p25, p75 = float(pe_pos.quantile(0.25)), float(pe_pos.quantile(0.75))
-    spread_ratio = p75 / p25 if p25 > 0 else np.nan
-    val_v = "Wide dispersion" if spread_ratio > 2.5 else ("Moderate dispersion" if spread_ratio > 1.8 else "Tight dispersion")
-
     regime = [
-        {"lens": "Valuation", "verdict": f"{pe.median():.0f}x median", "detail": f"p25 {p25:.0f}x – p75 {p75:.0f}x", "tone": "neutral"},
-        {"lens": "Growth", "verdict": growth_v, "detail": f"{eps_pos_pct:.0f}% growing EPS (3Y)", "tone": growth_t},
+        {"lens": "Breadth", "verdict": breadth_v, "detail": f"{pct_pos:.0f}% positive 1Y", "tone": breadth_t},
+        {
+            "lens": "Returns",
+            "verdict": f"{df['3Y CAGR (%)'].mean():+.0f}% avg 3Y",
+            "detail": f"5Y {df['5Y CAGR (%)'].mean():+.0f}%",
+            "tone": "pos" if df["3Y CAGR (%)"].mean() > 0 else "neg",
+        },
     ]
+
+    med_pe, _, _ = _median_pe_pos(df)
+    if not np.isnan(med_pe):
+        ey = 100.0 / med_pe
+        regime.insert(
+            0,
+            {
+                "lens": "Valuation",
+                "verdict": f"{med_pe:.0f}x · EY {ey:.1f}%",
+                "detail": f"vs G-Sec {RISK_FREE_RATE:.1f}%",
+                "tone": "warn" if ey < RISK_FREE_RATE else "pos",
+            },
+        )
+
     if TURN_COL in df.columns and df[TURN_COL].notna().any():
         turn = df[TURN_COL].dropna()
         illiq_n = int((turn < 5).sum())
         illiq_pct = illiq_n / len(turn) * 100
         liq_v, liq_t = ("Stressed", "neg") if illiq_pct > 40 else (("Tight", "warn") if illiq_pct > 20 else ("Healthy", "pos"))
         regime.append({"lens": "Liquidity", "verdict": liq_v, "detail": f"{illiq_n} names <5 Cr/day", "tone": liq_t})
-    regime.append({"lens": "Breadth", "verdict": breadth_v, "detail": f"{pct_pos:.0f}% positive 1Y", "tone": breadth_t})
     return regime
 
 
@@ -185,40 +307,87 @@ def cap_insights(df: pd.DataFrame) -> dict:
 
 
 def valuation_insights(df: pd.DataFrame) -> dict:
-    pe = df["P/E"].dropna()
-    pe_pos = pe[pe > 0]
-    p25, med, p75 = float(pe_pos.quantile(0.25)), float(pe_pos.median()), float(pe_pos.quantile(0.75))
-    loss_making = len(df) - len(pe)
-    wide = (p75 / p25) > 2.5 if p25 > 0 else True
-    tone = "warn" if wide else "neutral"
-    disp = "wide" if wide else "tight"
+    """Earnings-yield framing: what each rupee buys vs bonds, what growth the
+    required return demands, and whether actual growth covers it."""
+    med_pe, valid, loss_making = _median_pe_pos(df)
+    out = {"available": False, "valid": valid, "loss_making": loss_making}
+    if np.isnan(med_pe) or med_pe <= 0:
+        return out
+
+    ey = 100.0 / med_pe
+    needed = REQUIRED_RETURN - ey
+    eps3 = df[EPS_G3_COL].dropna() if EPS_G3_COL in df.columns else pd.Series(dtype=float)
+    profit3 = df[PROFIT_G3_COL].dropna() if PROFIT_G3_COL in df.columns else pd.Series(dtype=float)
+    base = eps3 if len(eps3) >= len(profit3) and len(eps3) else profit3
+    actual = float(base.median()) if len(base) else np.nan
+    gap = actual - needed if not np.isnan(actual) else np.nan
+
+    pb = df[PB_COL].dropna() if PB_COL in df.columns else pd.Series(dtype=float)
+    pb_med = float(pb.median()) if len(pb) else np.nan
+
+    tone, gap_word = ("pos", "covers it") if gap >= 2 else (("warn", "just about covers it") if gap >= -2 else ("neg", "falls short"))
     sentence = (
-        f"The universe trades at a median <b>{med:.1f}x</b> P/E; half of it sits between "
-        f"<b>{p25:.1f}x</b> and <b>{p75:.1f}x</b> - <b>{disp}</b> dispersion. "
-        f"{loss_making} companies are excluded (loss-making / no P/E)."
+        f"Each <b>₹100</b> of price buys <b>₹{ey:.1f}</b> of yearly profit - vs <b>₹{RISK_FREE_RATE:.1f}</b> "
+        f"risk-free in a G-Sec. To earn your <b>{REQUIRED_RETURN:.0f}%</b>, EPS must compound "
+        f"<b>~{needed:.1f}%/yr forever</b>; the universe's 3-yr pace of <b>{actual:+.1f}%</b> {gap_word}."
     )
-    return {
-        "sentence": sentence, "tone": tone,
-        "median": med, "p25": p25, "p75": p75,
-        "valid": len(pe), "loss_making": loss_making,
-    }
+    out.update(
+        {
+            "available": True,
+            "sentence": sentence,
+            "tone": tone,
+            "median_pe": med_pe,
+            "ey": ey,
+            "needed": needed,
+            "actual": actual,
+            "gap": gap,
+            "gap_tone": tone,
+            "pb_med": pb_med,
+            "pb_valid": len(pb),
+            "required_return": REQUIRED_RETURN,
+            "risk_free": RISK_FREE_RATE,
+        }
+    )
+    return out
 
 
 def growth_insights(df: pd.DataFrame) -> dict:
-    eps, rev = df["EPS Growth 3Y (%)"], df["Revenue Growth (%)"]
-    eps_valid, rev_valid = int(eps.notna().sum()), int(rev.notna().sum())
-    eps_pos_pct = float((eps > 0).mean() * 100) if eps_valid else np.nan
-    rev_pos_pct = float((rev > 0).mean() * 100) if rev_valid else np.nan
-    v, t = _breadth_verdict(eps_pos_pct) if eps_valid else ("Unknown", "neutral")
-    word = {"Strong": "broadly growing", "Mixed": "mixed", "Weak": "stalling"}[v]
+    """Sales / Profit / EPS rows: % growing + median, anchored as real growth."""
+    def row(s: pd.Series) -> dict:
+        valid = int(s.notna().sum())
+        pos_pct = float((s > 0).mean() * 100) if valid else np.nan
+        median = float(s.median()) if valid else np.nan
+        return {
+            "valid": valid,
+            "pos_pct": pos_pct,
+            "median": median,
+            "real_median": median - INFLATION if not np.isnan(median) else np.nan,
+            "tone": _breadth_verdict(pos_pct)[1] if valid else "neutral",
+        }
+
+    sales = row(df[REV_G_COL]) if REV_G_COL in df.columns else row(pd.Series(dtype=float))
+    profit = row(df[PROFIT_G1_COL] if PROFIT_G1_COL in df.columns else pd.Series(dtype=float))
+    eps = row(df[EPS_G3_COL] if EPS_G3_COL in df.columns else pd.Series(dtype=float))
+
+    primary = profit if profit["valid"] >= 30 and profit["valid"] >= eps["valid"] * 0.8 else eps
+    verdict_v, verdict_t = _breadth_verdict(primary["pos_pct"]) if primary["valid"] else ("Unknown", "neutral")
+    word = {"Strong": "broadly growing", "Mixed": "mixed", "Weak": "stalling"}[verdict_v]
+    src_name = "profit" if primary is profit else "EPS"
+
     sentence = (
-        f"Earnings breadth is <b>{v.lower()}</b>: <b>{eps_pos_pct:.0f}%</b> of companies grew EPS over 3Y "
-        f"(median <b>{eps.median():+.1f}%</b>). Revenue breadth: <b>{rev_pos_pct:.0f}%</b> growing YoY."
+        f"The bottom line is <b>{word}</b>: only <b>{primary['pos_pct']:.0f}%</b> of companies grew "
+        f"{src_name} (median <b>{primary['median']:+.1f}% nominal ≈ {primary['real_median']:+.1f}% real</b> "
+        f"after ~{INFLATION:.0f}% inflation). Sales breadth: <b>{sales['pos_pct']:.0f}%</b>; "
+        f"EPS-3Y breadth: <b>{eps['pos_pct']:.0f}%</b>."
     )
     return {
-        "sentence": sentence, "tone": t, "verdict_word": word,
-        "median_eps": float(eps.median()), "eps_pos_pct": eps_pos_pct,
-        "median_rev": float(rev.median()), "rev_pos_pct": rev_pos_pct,
+        "sentence": sentence,
+        "tone": verdict_t,
+        "verdict_word": word,
+        "sales": sales,
+        "profit": profit,
+        "eps": eps,
+        "inflation": INFLATION,
     }
 
 

@@ -1,8 +1,12 @@
 """Fetch Nifty Smallcap 250 fundamentals and returns into data/nifty_smallcap_250_data.csv.
 
-Based on the original capture script. One approved extension: EPS Growth 3Y (%)
-is computed from yfinance annual income statements (EPS CAGR over the available
-span, requiring >= 2 fiscal years). Everything else is kept exactly as before.
+Based on the original capture script. Approved extensions over the original:
+- EPS Growth 3Y (%): CAGR from annual income statements (>= 2 fiscal years).
+- P/B: yfinance priceToBook.
+- Profit Growth 1Y (%): Net Income latest FY vs prior FY (both positive).
+- Profit Growth 3Y (%): Net Income CAGR over available span (>= 2 fiscal years).
+The single stock.financials download is shared by all three statement metrics.
+Everything else is kept exactly as before.
 """
 import time
 from pathlib import Path
@@ -16,25 +20,44 @@ HEADERS = {"User-Agent": "Mozilla/5.0"}
 OUT_PATH = Path(__file__).resolve().parents[1] / "data" / "nifty_smallcap_250_data.csv"
 
 
-def eps_growth_3y(stock) -> float:
-    """3-year EPS CAGR from annual income statements. Graceful NaN if unavailable."""
+def _row(fin: pd.DataFrame | None, names: tuple[str, ...]):
+    """Return the first matching index row (sorted chronologically) or None."""
+    if fin is None or fin.empty:
+        return None
+    for name in names:
+        if name in fin.index:
+            s = fin.loc[name].dropna().sort_index()
+            if len(s):
+                return s
+    return None
+
+
+def _cagr(s) -> float:
+    """CAGR % across the available span of a chronological series."""
+    if s is None or len(s) < 2:
+        return np.nan
+    oldest, latest = float(s.iloc[0]), float(s.iloc[-1])
+    span_years = (s.index[-1] - s.index[0]).days / 365.25
+    if span_years < 2 or oldest <= 0 or latest <= 0:
+        return np.nan
+    return ((latest / oldest) ** (1 / span_years) - 1) * 100
+
+
+def profit_growth_1y(fin) -> float:
+    """Net Income latest FY vs prior FY growth %. NaN unless both positive."""
+    ni = _row(fin, ("Net Income", "Net Income Common Stockholders"))
+    if ni is None or len(ni) < 2:
+        return np.nan
+    prev, latest = float(ni.iloc[-2]), float(ni.iloc[-1])
+    if prev <= 0 or latest <= 0:
+        return np.nan
+    return (latest / prev - 1) * 100
+
+
+def profit_growth_3y(fin) -> float:
+    """Net Income CAGR % across the available span. Graceful NaN if unavailable."""
     try:
-        fin = stock.financials
-        if fin is None or fin.empty:
-            return np.nan
-        eps = None
-        for row_name in ("Diluted EPS", "Basic EPS"):
-            if row_name in fin.index:
-                eps = fin.loc[row_name].dropna()
-                break
-        if eps is None or len(eps) < 2:
-            return np.nan
-        eps = eps.sort_index()
-        oldest, latest = float(eps.iloc[0]), float(eps.iloc[-1])
-        span_years = (eps.index[-1] - eps.index[0]).days / 365.25
-        if span_years < 2 or oldest <= 0 or latest <= 0:
-            return np.nan
-        return ((latest / oldest) ** (1 / span_years) - 1) * 100
+        return _cagr(_row(fin, ("Net Income", "Net Income Common Stockholders")))
     except Exception:
         return np.nan
 
@@ -57,8 +80,11 @@ def main() -> None:
             "Industry": np.nan,
             "Market Cap (Cr)": np.nan,
             "P/E": np.nan,
+            "P/B": np.nan,
             "EPS Growth 1Y (%)": np.nan,
             "EPS Growth 3Y (%)": np.nan,
+            "Profit Growth 1Y (%)": np.nan,
+            "Profit Growth 3Y (%)": np.nan,
             "Revenue Growth (%)": np.nan,
             "ROCE (%)": np.nan,
             "ROE (%)": np.nan,
@@ -73,6 +99,10 @@ def main() -> None:
             stock = yf.Ticker(ticker)
             info = stock.info
             hist = stock.history(period="5y")
+            try:
+                fin = stock.financials
+            except Exception:
+                fin = None
 
             cmp_price = info.get("currentPrice", np.nan)
             ret_1y = ((cmp_price / hist["Close"].iloc[-252] - 1) * 100) if len(hist) >= 252 else np.nan
@@ -86,8 +116,11 @@ def main() -> None:
                 "Industry": info.get("industry", "N/A"),
                 "Market Cap (Cr)": round(info.get("marketCap", 0) / 1e7, 2),
                 "P/E": info.get("trailingPE", np.nan),
+                "P/B": info.get("priceToBook", np.nan),
                 "EPS Growth 1Y (%)": info.get("earningsGrowth", np.nan) * 100 if info.get("earningsGrowth") else np.nan,
-                "EPS Growth 3Y (%)": round(eps_growth_3y(stock), 2),
+                "EPS Growth 3Y (%)": round(_cagr(_row(fin, ("Diluted EPS", "Basic EPS"))), 2),
+                "Profit Growth 1Y (%)": round(profit_growth_1y(fin), 2),
+                "Profit Growth 3Y (%)": round(profit_growth_3y(fin), 2),
                 "Revenue Growth (%)": info.get("revenueGrowth", np.nan) * 100 if info.get("revenueGrowth") else np.nan,
                 "ROCE (%)": np.nan,
                 "ROE (%)": info.get("returnOnEquity", np.nan) * 100 if info.get("returnOnEquity") else np.nan,

@@ -95,7 +95,8 @@ eps_rng = st.sidebar.slider("EPS Growth 3Y (%)", eps_lo, eps_hi, (eps_lo, eps_hi
 ret_rng = st.sidebar.slider("1Y Return (%)", ret_lo, ret_hi, (ret_lo, ret_hi))
 
 ret_mode = st.sidebar.radio("Returns", ["All stocks", "Positive return", "Negative return"], horizontal=True)
-quad_sidebar = st.sidebar.multiselect("Quadrant", QUADRANTS)
+preset_quad = ss.pop("micro_preset_quadrant", None) or []
+quad_sidebar = st.sidebar.multiselect("Quadrant", QUADRANTS, default=[q for q in preset_quad if q in QUADRANTS])
 
 view = df_full.copy()
 if sel_sectors:

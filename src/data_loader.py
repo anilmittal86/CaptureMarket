@@ -10,8 +10,11 @@ DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "nifty_smallcap_250_d
 NUMERIC_COLUMNS = [
     "Market Cap (Cr)",
     "P/E",
+    "P/B",
     "EPS Growth 1Y (%)",
     "EPS Growth 3Y (%)",
+    "Profit Growth 1Y (%)",
+    "Profit Growth 3Y (%)",
     "Revenue Growth (%)",
     "ROCE (%)",
     "ROE (%)",
