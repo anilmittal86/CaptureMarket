@@ -7,6 +7,7 @@ venv/
 
 # Generated data (run scripts/fetch_data.py to regenerate)
 data/*.csv
+data/fetch_log.txt
 
 # Secrets
 .streamlit/secrets.toml
