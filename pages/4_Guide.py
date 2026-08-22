@@ -76,19 +76,19 @@ with st.expander("The Market Verdict - the math behind the headline", expanded=T
         So to earn your assumed **{REQUIRED_RETURN:.0f}%**, EPS must compound at
         `{REQUIRED_RETURN:.0f}% − {E['ey']}` ≈ **{E['needed']} forever**.
 
-        **Step 3 - Compare with actual growth.** The universe's real 3-yr EPS pace is
-        **{E['actual']}**. Three outcomes:
+        **Step 3 - Run two hard gates.** Both must pass for a margin of safety:
 
-        | Outcome | Meaning |
-        |---|---|
-        | ✅ Justified + margin of safety | Expected return beats your bar by ≥2 pp |
-        | ⚠️ Fully priced | Within ±2 pp - zero cushion for disappointment |
-        | 🔻 Doesn't justify | Shortfall >2 pp - growth must accelerate or prices fall |
+        | Gate | Rule | Why |
+        |---|---|---|
+        | 1. Growth hurdle | Real historical growth > `Required − EY` (~{E['needed']}) | Growth must repay what yield doesn't |
+        | 2. Safety buffer | `EY` ({E['ey']}) > G-Sec ({RISK_FREE_RATE:.1f}%) | Otherwise a riskless bond beats this market before growth even starts |
 
-        **Step 4 - Margin of safety as a fair P/E.**
-        At actual growth, the P/E that exactly delivers {REQUIRED_RETURN:.0f}% is
-        `100 ÷ ({REQUIRED_RETURN:.0f}% − {E['actual']})` = **{E['fair_pe']}**. Today's {E['pe']}
-        vs fair {E['fair_pe']} tells you how much price excess (or cushion) you're carrying.
+        Verdicts: ✅ **PASS** (both gates) · ⚠️ **MIXED** (one) · 🔻 **FAIL** (none - priced
+        for perfection, zero margin of safety).
+
+        **Index basis.** The check treats all 250 companies as one index: earnings are
+        summed (`cap ÷ P/E` per priced company), so the index P/E is *cap-weighted* -
+        big names count more than in the median multiple shown elsewhere.
         """
     )
 

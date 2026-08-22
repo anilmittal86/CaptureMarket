@@ -144,6 +144,39 @@ def regime_strip(verdicts: list) -> None:
 _VERDICT_ICONS = {"pos": "✅", "warn": "⚠️", "neg": "🔻"}
 
 
+def status_badge(passed: bool) -> str:
+    """[PASS]/[FAIL] badge used inside the reality-check table."""
+    if passed:
+        return '<span style="color:#16A34A;font-weight:700;">&#10004; PASS</span>'
+    return '<span style="color:#DC2626;font-weight:700;">&#10008; FAIL</span>'
+
+
+def evaluation_table(rows: list[dict]) -> None:
+    """Reality-check table. Each row: title, subtitle, math, target, passed."""
+    head = (
+        '<tr style="border-bottom:2px solid #E2E8F0;background:#F8FAFC;">'
+        '<th style="padding:12px;text-align:left;width:34%;">Metric</th>'
+        '<th style="padding:12px;text-align:left;">The Math</th>'
+        '<th style="padding:12px;text-align:left;">Target for Safety</th>'
+        '<th style="padding:12px;text-align:left;">Status</th></tr>'
+    )
+    body = ""
+    for r in rows:
+        body += (
+            f'<tr style="border-bottom:1px solid #EEF2F7;">'
+            f'<td style="padding:12px;"><strong>{r["title"]}</strong><br>'
+            f'<span style="font-size:0.85em;color:#64748B;">{r["subtitle"]}</span></td>'
+            f'<td style="padding:12px;font-weight:700;color:#0F172A;">{r["math"]}</td>'
+            f'<td style="padding:12px;font-size:0.9em;color:#475569;">{r["target"]}</td>'
+            f'<td style="padding:12px;">{status_badge(r["passed"])}</td></tr>'
+        )
+    st.markdown(
+        f'<table style="width:100%;text-align:left;border-collapse:collapse;'
+        f'background:#FFFFFF;border:1px solid #E2E8F0;border-radius:10px;">{head}{body}</table>',
+        unsafe_allow_html=True,
+    )
+
+
 def verdict_banner(headline: str, body_html: str, foot_html: str, tone: str) -> None:
     """The Market Verdict block: does growth justify valuations, with MoS."""
     bg, border = _BANNER_TONES.get(tone, _BANNER_TONES["neutral"])

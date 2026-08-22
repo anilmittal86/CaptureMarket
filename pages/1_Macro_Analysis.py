@@ -19,14 +19,12 @@ from src.analytics import (
     QUADRANTS,
     QUADRANT_COLORS,
     cap_insights,
-    growth_insights,
     market_regime,
     market_verdict,
     quadrant_counts,
-    valuation_insights,
 )
 from src.data_loader import get_data
-from src.ui import cr_fmt, inject_css, insight_banner, muted_strip, quad_tile, stat_card, verdict_banner, growth_row
+from src.ui import cr_fmt, evaluation_table, inject_css, insight_banner, muted_strip, quad_tile, stat_card, verdict_banner
 
 st.set_page_config(page_title="Macro | CaptureMarket", page_icon=None, layout="wide")
 inject_css()
@@ -58,60 +56,73 @@ else:
     )
 
 # ===========================================================================
-# Zone 1b: HERO PANELS - Valuation | Growth
+# Zone 1b: REALITY CHECK - the universe as one index, two hard gates
 # ===========================================================================
-hero_val, hero_gro = st.columns(2, gap="medium")
-
-with hero_val:
-    st.markdown('<div class="hero-title">Valuation</div>', unsafe_allow_html=True)
-    vi = valuation_insights(df)
-    if vi.get("available"):
-        insight_banner(vi["sentence"], vi["tone"])
-        c1, c2 = st.columns(2)
-        with c1:
-            pb_txt = f"{vi['pb_med']:.1f}x" if vi["pb_med"] == vi["pb_med"] else "N/A"
-            stat_card("Median P/E", f"{vi['median_pe']:.1f}x", f"median P/B {pb_txt}")
-        with c2:
-            stat_card(
-                "Earnings Yield",
-                f"{vi['ey']:.1f}%",
-                f"G-Sec pays {vi['risk_free']:.1f}% risk-free",
-                "warn" if vi["ey"] < vi["risk_free"] else "pos",
-            )
-        c3, c4 = st.columns(2)
-        with c3:
-            stat_card("Needed EPS Growth", f"~{vi['needed']:.1f}%/yr", f"to earn your {vi['required_return']:.0f}%, forever")
-        with c4:
-            gap = vi["gap"]
-            gap_word = "covers it" if gap >= 2 else ("just covers it" if gap >= -2 else "falls short")
-            stat_card(
-                "Actual EPS Growth (3Y)",
-                f"{vi['actual']:+.1f}%",
-                f"vs needed ~{vi['needed']:.1f}% → {gap_word}",
-                vi["gap_tone"],
-            )
-    else:
-        st.info(f"Not enough priced companies ({vi['valid']} valid P/E) to compute the valuation lens.")
-
-with hero_gro:
-    st.markdown('<div class="hero-title">Growth</div>', unsafe_allow_html=True)
-    gi = growth_insights(df)
-    insight_banner(gi["sentence"], gi["tone"])
-    infl = gi["inflation"]
-    sales, profit, eps = gi["sales"], gi["profit"], gi["eps"]
-
-    def _meta(d: dict) -> str:
-        if not d["valid"]:
-            return "no data"
-        return (
-            f"median <b>{d['median']:+.1f}%</b> nominal"
-            f"<br>≈ <b>{d['real_median']:+.1f}% real</b> after ~{infl:.0f}% inflation"
+if vd.get("available"):
+    st.markdown('<div class="hero-title">Market Snapshot - the universe as one index</div>', unsafe_allow_html=True)
+    s1, s2, s3, s4 = st.columns(4)
+    with s1:
+        stat_card("Index P/E", f"{vd['idx_pe']:.1f}x", f"cap-weighted · {vd['priced_n']} priced cos")
+    with s2:
+        stat_card(
+            "Earnings Yield",
+            f"{vd['ey']:.1f}%",
+            f"G-Sec pays {vd['risk_free']:.1f}% risk-free",
+            "pos" if vd['buffer_pass'] else "warn",
+        )
+    with s3:
+        stat_card("Nominal Growth", f"{vd['nominal_growth']:+.1f}%", "median EPS 3-yr CAGR")
+    with s4:
+        stat_card(
+            "Real Growth",
+            f"{vd['structural_growth']:+.1f}%",
+            f"after ~{vd['inflation']:.0f}% inflation",
+            "pos" if vd['structural_growth'] > 0 else "neg",
         )
 
-    growth_row("Sales", sales["pos_pct"], _meta(sales), sales["tone"])
-    growth_row("Profit", profit["pos_pct"], _meta(profit), profit["tone"])
-    growth_row("EPS 3Y", eps["pos_pct"], _meta(eps), eps["tone"])
-    st.caption(f"Bar = share of companies with data that grew · medians are YoY unless labelled 3Y.")
+    st.markdown('<div class="section-title">The Reality Check - two hard gates at your required return</div>', unsafe_allow_html=True)
+    evaluation_table(
+        [
+            {
+                "title": "1. The Growth Hurdle",
+                "subtitle": "Growth needed forever to justify today's price.",
+                "math": f"~{vd['implied_growth'] * 100:.1f}% / yr",
+                "target": (
+                    f"Real growth must beat it. "
+                    f"({vd['required_return']:.0f}% required − {vd['ey']:.1f}% yield)."
+                ),
+                "passed": vd["growth_pass"],
+            },
+            {
+                "title": "2. Structural Growth (real)",
+                "subtitle": f"Median EPS 3-yr CAGR deflated by ~{vd['inflation']:.0f}% inflation.",
+                "math": (
+                    f"{vd['structural_growth']:+.1f}% / yr real"
+                    f"<br><span style='font-size:0.8em;font-weight:normal;color:#64748B;'>"
+                    f"({vd['nominal_growth']:+.1f}% nominal)</span>"
+                ),
+                "target": "Must comfortably clear the hurdle.",
+                "passed": vd["growth_pass"],
+            },
+            {
+                "title": "3. Safety Buffer",
+                "subtitle": "Index earnings yield vs the risk-free bank rate.",
+                "math": (
+                    f"{vd['safety_buffer'] * 100:+.1f}%"
+                    f"<br><span style='font-size:0.8em;font-weight:normal;color:#64748B;'>"
+                    f"({vd['ey']:.1f}% vs {vd['risk_free']:.1f}%)</span>"
+                ),
+                "target": "Must be positive - equity yield above the G-Sec.",
+                "passed": vd["buffer_pass"],
+            },
+        ]
+    )
+    st.caption(f"{vd['loss_making']} loss-making / unpriced companies are excluded from index earnings.")
+else:
+    insight_banner(
+        "Reality Check unavailable: too few companies have a positive P/E in this snapshot.",
+        "warn",
+    )
 
 # ===========================================================================
 # Zone 2: WHERE VALUE MEETS GROWTH - quadrant synthesis, click to explore

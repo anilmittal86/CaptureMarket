@@ -163,71 +163,72 @@ def _median_pe_pos(df: pd.DataFrame) -> tuple[float, int, int]:
 
 
 def market_verdict(df: pd.DataFrame) -> dict:
-    """Top-of-page answer: does growth justify valuations at the required
-    return, and is there a margin of safety?
+    """Reality Check: treat the whole universe as one index and demand it pass
+    two hard gates at the required return.
 
-    Math: expected return ~ EarningsYield + perpetual EPS growth. Needed
-    growth = REQUIRED_RETURN - EY. Margin of safety is expressed as the gap
-    between the P/E the required return implies at actual growth (fair P/E)
-    and today's P/E.
+      Gate 1 - Growth Hurdle:  needed growth = REQUIRED_RETURN - earnings yield;
+               real historical growth must beat it.
+      Gate 2 - Safety Buffer:  earnings yield must exceed the risk-free G-Sec
+               yield; otherwise equities pay less than a riskless bond.
+
+    Index aggregates: total earnings are summed across priced companies
+    (earnings_i = cap_i / PE_i), so the index P/E is cap-weighted, not the
+    median multiple. Structural growth uses the median EPS 3-yr CAGR as the
+    best available long-run proxy, deflated by the inflation anchor.
     """
-    med_pe, _, loss_making = _median_pe_pos(df)
     out = {"available": False}
-    if np.isnan(med_pe) or med_pe <= 0:
+    priced = df[df[PE_COL] > 0] if PE_COL in df.columns else df.iloc[0:0]
+    if priced.empty:
         return out
 
-    ey = 100.0 / med_pe
-    needed = REQUIRED_RETURN - ey
+    caps = priced["Market Cap (Cr)"].fillna(0).astype(float)
+    earnings = caps / priced[PE_COL].astype(float)
+    total_cap, total_earnings = float(caps.sum()), float(earnings.sum())
+    if total_earnings <= 0 or total_cap <= 0:
+        return out
+
+    idx_pe = total_cap / total_earnings
+    ey = total_earnings / total_cap * 100  # percent
+    implied_growth = REQUIRED_RETURN - ey
+    safety_buffer = ey - RISK_FREE_RATE
+
     eps3 = df[EPS_G3_COL].dropna() if EPS_G3_COL in df.columns else pd.Series(dtype=float)
     profit3 = df[PROFIT_G3_COL].dropna() if PROFIT_G3_COL in df.columns else pd.Series(dtype=float)
-    actual_src = "EPS 3-yr CAGR" if len(eps3) >= len(profit3) and len(eps3) else ("profit 3-yr CAGR" if len(profit3) else "")
-    base = eps3 if len(eps3) >= len(profit3) and len(eps3) else profit3
-    if base.empty or np.isnan(needed):
+    base = eps3 if len(eps3) >= len(profit3) else profit3
+    src_label = "median EPS 3-yr CAGR" if base is eps3 and len(eps3) else "median profit 3-yr CAGR"
+    if base.empty or np.isnan(implied_growth):
         return out
-    actual = float(base.median())
+    nominal_growth = float(base.median())
+    structural_growth = nominal_growth - INFLATION
 
-    expected = ey + actual
-    buffer = expected - REQUIRED_RETURN
-    fair_pe = 100.0 / (REQUIRED_RETURN - actual) if REQUIRED_RETURN > actual else np.inf
-
-    if buffer >= 2:
+    growth_pass = structural_growth > implied_growth
+    buffer_pass = safety_buffer > 0
+    n_pass = int(growth_pass) + int(buffer_pass)
+    if n_pass == 2:
+        tier, headline, tone = "pass", "PASS - GROWTH JUSTIFIES VALUATIONS, WITH A MARGIN OF SAFETY", "pos"
+    elif n_pass == 1:
+        failed = "the safety buffer" if buffer_pass else "the growth hurdle"
         tier, headline, tone = (
-            "justified",
-            f"GROWTH JUSTIFIES VALUATIONS - with a margin of safety",
-            "pos",
-        )
-        if np.isfinite(fair_pe):
-            mos_line = (
-                f"At current growth a {REQUIRED_RETURN:.0f}% return tolerates a P/E up to "
-                f"{fair_pe:.1f}x vs {med_pe:.1f}x today - prices could rise "
-                f"{(fair_pe / med_pe - 1) * 100:.0f}% and still deliver."
-            )
-        else:
-            mos_line = (
-                f"Growth alone ({actual:+.1f}%) already exceeds your {REQUIRED_RETURN:.0f}% bar before "
-                f"counting the earnings yield - by this measure valuation risk is low."
-            )
-    elif buffer >= -2:
-        tier, headline, tone = "full", "FULLY PRICED - NO MARGIN OF SAFETY", "warn"
-        mos_line = (
-            f"A {REQUIRED_RETURN:.0f}% return needs EPS to compound ~{needed:.1f}%/yr forever; "
-            f"the actual 3-yr pace ({actual:+.1f}%) nearly matches - zero cushion for disappointment."
+            "mixed",
+            f"MIXED - REAL GROWTH CLEARS THE HURDLE BUT {failed.upper()} FAILS" if not buffer_pass
+            else "MIXED - THE SAFETY BUFFER HOLDS BUT GROWTH MISSES THE HURDLE",
+            "warn",
         )
     else:
-        tier, headline, tone = "shortfall", "GROWTH DOES NOT JUSTIFY VALUATIONS", "neg"
-        shortfall = REQUIRED_RETURN - expected
-        price_cut = (1 - fair_pe / med_pe) * 100 if np.isfinite(fair_pe) else np.nan
-        cut_txt = f", or prices would need to fall ~{price_cut:.0f}%" if np.isfinite(fair_pe) else ""
-        mos_line = (
-            f"Growth falls ~{abs(shortfall):.1f} pp short of what {med_pe:.1f}x demands - "
-            f"EPS must accelerate{cut_txt}."
-        )
+        tier, headline, tone = "fail", "FAIL - PRICED FOR PERFECTION, ZERO MARGIN OF SAFETY", "neg"
 
     sentence = (
-        f"Your required return is <b>{REQUIRED_RETURN:.0f}%</b>. At a median <b>{med_pe:.1f}x</b> P/E "
-        f"(earnings yield <b>{ey:.1f}%</b>), that demands <b>~{needed:.1f}%/yr</b> EPS growth forever. "
-        f"The universe's actual {actual_src}: <b>{actual:+.1f}%</b>."
+        f"As one index, the universe trades at <b>{idx_pe:.1f}x</b> (earnings yield <b>{ey:.1f}%</b>). "
+        f"Earning your <b>{REQUIRED_RETURN:.0f}%</b> demands <b>~{implied_growth * 100:.1f}%/yr</b> perpetual "
+        f"growth; the best long-run proxy ({src_label}) is <b>{nominal_growth:+.1f}%</b> nominal "
+        f"(≈<b>{structural_growth:+.1f}% real</b>). Meanwhile a risk-free G-Sec already pays "
+        f"<b>{RISK_FREE_RATE:.1f}%</b> vs this market's {ey:.1f}%."
     )
+    mos_line = (
+        f"Gates passed: <b>{n_pass}/2</b>. Growth hurdle {'✅' if growth_pass else '❌'} · "
+        f"Safety buffer ({ey:.1f}% vs {RISK_FREE_RATE:.1f}%) {'✅' if buffer_pass else '❌'}."
+    )
+
     out.update(
         {
             "available": True,
@@ -236,16 +237,20 @@ def market_verdict(df: pd.DataFrame) -> dict:
             "tone": tone,
             "sentence": sentence,
             "mos_line": mos_line,
-            "median_pe": med_pe,
+            "idx_pe": idx_pe,
             "ey": ey,
-            "needed": needed,
-            "actual": actual,
-            "expected": expected,
-            "buffer": buffer,
-            "fair_pe": fair_pe,
-            "loss_making": loss_making,
+            "implied_growth": implied_growth,
+            "nominal_growth": nominal_growth,
+            "structural_growth": structural_growth,
+            "safety_buffer": safety_buffer,
+            "growth_pass": growth_pass,
+            "buffer_pass": buffer_pass,
+            "gates_passed": n_pass,
+            "priced_n": len(priced),
+            "loss_making": len(df) - len(priced),
             "required_return": REQUIRED_RETURN,
             "risk_free": RISK_FREE_RATE,
+            "inflation": INFLATION,
         }
     )
     return out
