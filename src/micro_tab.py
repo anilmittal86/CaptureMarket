@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from datetime import datetime
+from pathlib import Path
 
 
 def render_micro_tab(df_universe: pd.DataFrame):
@@ -59,13 +61,6 @@ def render_micro_tab(df_universe: pd.DataFrame):
         else:
             return "Value / Low Growth" if pe < MEDIAN_PE else "Expensive / Low Growth"
 
-    quadrant_map = {
-        "Growth + Value": "Q1 (Growth + Value)",
-        "Growth + Premium": "Q2 (Growth + Premium)",
-        "Value / Low Growth": "Q3 (Value / Low Growth)",
-        "Expensive / Low Growth": "Q4 (Expensive / Low Growth)",
-    }
-
     df["Quadrant"] = df.apply(_assign_quadrant, axis=1)
     df_valid["Quadrant"] = df_valid.apply(_assign_quadrant, axis=1)
 
@@ -97,9 +92,6 @@ def render_micro_tab(df_universe: pd.DataFrame):
         ocf = row.get("OCF_PAT")
         netdebt = row.get("Net_Debt_EBITDA")
         peg = row.get("PEG")
-
-        def _gt0(v):
-            return pd.notna(v) and v > 0
 
         if is_bfsi:
             if (pd.notna(roa) and 0 < roa < 1.10) or (pd.notna(roe) and 0 < roe < 10.0) or (pd.notna(pe) and pd.notna(pb) and pe > 25.0 and pb > 3.5):
@@ -196,27 +188,13 @@ def render_micro_tab(df_universe: pd.DataFrame):
         hover_parts.append("<br>".join(parts))
 
     fig = go.Figure()
-
-    fig.add_trace(
-        go.Scatter(
-            x=df_valid["P/E"],
-            y=df_valid["EPS Growth 3Y"],
-            mode="markers",
-            marker=dict(size=sizes, color=colors, line=dict(width=0.5, color="#333"), opacity=0.85),
-            text=hover_parts,
-            hoverinfo="text",
-            name="Universe",
-        )
-    )
-
+    fig.add_trace(go.Scatter(x=df_valid["P/E"], y=df_valid["EPS Growth 3Y"], mode="markers", marker=dict(size=sizes, color=colors, line=dict(width=0.5, color="#333"), opacity=0.85), text=hover_parts, hoverinfo="text", name="Universe"))
     fig.add_shape(type="line", x0=MEDIAN_PE, x1=MEDIAN_PE, y0=df_valid["EPS Growth 3Y"].min(), y1=df_valid["EPS Growth 3Y"].max(), line=dict(color="#1f77b4", width=1.5, dash="dash"))
     fig.add_shape(type="line", x0=df_valid["P/E"].min(), x1=df_valid["P/E"].max(), y0=MEDIAN_EPS_3Y, y1=MEDIAN_EPS_3Y, line=dict(color="#1f77b4", width=1.5, dash="dash"))
-
     fig.add_annotation(xref="paper", yref="paper", x=0.25, y=0.95, showarrow=False, text="<b>Q1 GROWTH + VALUE</b><br>High EPS Growth \u2022 Low P/E", font=dict(size=10, color="#1a1a1a"), bgcolor="rgba(255,255,255,0.7)", borderpad=4, align="center")
     fig.add_annotation(xref="paper", yref="paper", x=0.75, y=0.95, showarrow=False, text="<b>Q2 GROWTH + PREMIUM</b><br>High EPS Growth \u2022 High P/E", font=dict(size=10, color="#1a1a1a"), bgcolor="rgba(255,255,255,0.7)", borderpad=4, align="center")
     fig.add_annotation(xref="paper", yref="paper", x=0.25, y=0.05, showarrow=False, text="<b>Q3 VALUE / LOW GROWTH</b><br>Low EPS Growth \u2022 Low P/E", font=dict(size=10, color="#1a1a1a"), bgcolor="rgba(255,255,255,0.7)", borderpad=4, align="center")
     fig.add_annotation(xref="paper", yref="paper", x=0.75, y=0.05, showarrow=False, text="<b>Q4 EXPENSIVE / LOW GROWTH</b><br>Low EPS Growth \u2022 High P/E", font=dict(size=10, color="#1a1a1a"), bgcolor="rgba(255,255,255,0.7)", borderpad=4, align="center")
-
     if selected_row is not None and pd.notna(selected_row.get("P/E")) and pd.notna(selected_row.get("EPS Growth 3Y")):
         sx = float(selected_row["P/E"])
         sy = float(selected_row["EPS Growth 3Y"])
@@ -224,34 +202,24 @@ def render_micro_tab(df_universe: pd.DataFrame):
         ymin = float(df_valid["EPS Growth 3Y"].min())
         fig.add_shape(type="line", x0=xmin, x1=sx, y0=sy, y1=sy, line=dict(color="black", width=1, dash="dot"))
         fig.add_shape(type="line", x0=sx, x1=sx, y0=ymin, y1=sy, line=dict(color="black", width=1, dash="dot"))
-        fig.add_trace(
-            go.Scatter(
-                x=[sx],
-                y=[sy],
-                mode="markers",
-                marker=dict(size=max(14, float(sizes.loc[selected_row.name]) if selected_row.name in sizes.index else 14) + 8, color=colors[df_valid.index.get_loc(selected_row.name)] if selected_row.name in df_valid.index else "#FFD54F", line=dict(color="black", width=3)),
-                hoverinfo="skip",
-                showlegend=False,
-            )
-        )
+        fig.add_trace(go.Scatter(x=[sx], y=[sy], mode="markers", marker=dict(size=max(14, float(sizes.loc[selected_row.name]) if selected_row.name in sizes.index else 14) + 8, color=colors[df_valid.index.get_loc(selected_row.name)] if selected_row.name in df_valid.index else "#FFD54F", line=dict(color="black", width=3)), hoverinfo="skip", showlegend=False))
 
-    fig.update_layout(
-        title="Valuation vs Earnings Growth — Centered Quadrant Map",
-        xaxis=dict(title="P/E (valuation)", type="log" if log_toggle else "linear", gridcolor="rgba(0,0,0,0.08)"),
-        yaxis=dict(title="EPS Growth 3Y (%)", gridcolor="rgba(0,0,0,0.08)", zeroline=True, zerolinecolor="rgba(0,0,0,0.15)"),
-        height=620,
-        margin=dict(l=60, r=20, t=60, b=60),
-        plot_bgcolor="#FAFAFA",
-        paper_bgcolor="white",
-        legend=dict(orientation="h", y=-0.12),
-    )
-
+    fig.update_layout(title="Valuation vs Earnings Growth — Centered Quadrant Map", xaxis=dict(title="P/E (valuation)", type="log" if log_toggle else "linear", gridcolor="rgba(0,0,0,0.08)"), yaxis=dict(title="EPS Growth 3Y (%)", gridcolor="rgba(0,0,0,0.08)", zeroline=True, zerolinecolor="rgba(0,0,0,0.15)"), height=620, margin=dict(l=60, r=20, t=60, b=60), plot_bgcolor="#FAFAFA", paper_bgcolor="white", legend=dict(orientation="h", y=-0.12))
     st.plotly_chart(fig, width="stretch")
-
     st.caption(f"Median P/E **{MEDIAN_PE:.1f}x** · Median EPS Growth 3Y **{MEDIAN_EPS_3Y:+.1f}%** · {len(df_valid)} / {len(df)} companies plotted (P/E > 0)")
 
     if selected_row is None:
         st.info("Select a stock above to see the 5-second decision cockpit.")
+        try:
+            from src.data_loader import DATA_PATH
+            if DATA_PATH.exists():
+                mtime = datetime.fromtimestamp(DATA_PATH.stat().st_mtime).strftime("%d %b %Y, %H:%M")
+                st.caption(f"Data snapshot: **{mtime}** · Source: Nifty Smallcap 250 constituents via **NSE India** + fundamentals via **Yahoo Finance (yfinance)**. Snapshot: `data/nifty_smallcap_250_data.csv` generated by `scripts/fetch_data.py`.")
+            else:
+                st.caption("Source: Nifty Smallcap 250 via NSE India + Yahoo Finance. No snapshot file found.")
+        except Exception:
+            pass
+        st.caption("**N/A** = field not present in the current snapshot or not calculable (e.g., `CMP`/`50 DMA`/`200 DMA` need price history; `OCF_PAT`/`Net_Debt_EBITDA`/`ROA` need cash-flow/balance-sheet fields not yet ingested). Profitability fields `ROCE`/`ROE` are available for most of the universe; a specific stock may still be — if its source data was missing.")
         return
 
     archetype = str(selected_row.get("Archetype", "Watchlist / Neutral"))
@@ -322,57 +290,88 @@ def render_micro_tab(df_universe: pd.DataFrame):
         mult = 1.0
         mult_label = "1.0x (baseline)"
 
-    if verdict == "HARD PASS":
-        Q = 0.0
-    else:
-        Q = min(base_w * mult, 8.0)
+    prospective_Q = 0.0 if verdict == "HARD PASS" else min(base_w * mult, 8.0)
+    active_Q = 0.0 if verdict in ("HARD PASS", "WATCHLIST") else prospective_Q
 
     col1, col2, col3 = st.columns(3)
+
+    def _na_note(col_name):
+        return f"— (not in current snapshot — requires `{col_name}` field)"
 
     with col1:
         st.markdown("#### \U0001f3af When to Buy")
         st.markdown(f"**Archetype:** `{archetype}`")
         st.markdown(f"**Quadrant:** {quadrant if pd.notna(quadrant) else 'N/A'}")
         if is_bfsi_sel:
-            pb_txt = f"{pb:.1f}x" if pd.notna(pb) else "N/A"
-            pe_txt = f"{pe:.1f}x" if pd.notna(pe) else "N/A"
+            pb_txt = f"{pb:.1f}x" if pd.notna(pb) else _na_note("P/B")
+            pe_txt = f"{pe:.1f}x" if pd.notna(pe) else _na_note("P/E")
             st.markdown(f"**Valuation gate (BFSI):** P/E {pe_txt} · P/B {pb_txt}")
-            roa_txt = f"{roa:.2f}%" if pd.notna(roa) else "N/A"
-            st.markdown(f"**Fundamental gate (BFSI):** ROA {roa_txt} — {'✅' if _ge(roa, 1.3) else '⚠️ soft'}")
+            roa_txt = f"{roa:.2f}%" if pd.notna(roa) else _na_note("ROA")
+            ok = "\u2705"
+            warn = "\u26a0\ufe0f"
+            roa_status = ok if _ge(roa, 1.3) else (warn + " soft" if pd.notna(roa) else "pending data")
+            st.markdown(f"**Fundamental gate (BFSI \u2014 ROA):** {roa_txt} \u2014 {roa_status}")
         else:
-            peg_txt = f"{peg:.2f}" if pd.notna(peg) else "N/A"
+            peg_txt = f"{peg:.2f}" if pd.notna(peg) else _na_note("PEG = P/E \u00f7 EPS Growth 3Y")
             peg_ok = pd.notna(peg) and peg <= 1.5
-            st.markdown(f"**Valuation gate:** PEG {peg_txt} — {'✅ fair' if peg_ok else '⚠️ stretched' if pd.notna(peg) else 'N/A'}")
-            rev_txt = f"{rev:+.1f}%" if pd.notna(rev) else "N/A"
-            st.markdown(f"**Fundamental gate:** Revenue growth {rev_txt} — {'✅' if pd.notna(rev) and rev >= 12 else '⚠️ needs >12%' if pd.notna(rev) else 'N/A'}")
-
+            ok = "\u2705"
+            warn = "\u26a0\ufe0f"
+            peg_status = ok + " fair (\u22641.5)" if peg_ok else (warn + " stretched (>1.5)" if pd.notna(peg) else "pending data (needs P/E & EPS Growth 3Y)")
+            st.markdown(f"**Valuation gate (Non-BFSI \u2014 PEG):** {peg_txt} \u2014 {peg_status}")
+            rev_txt = f"{rev:+.1f}%" if pd.notna(rev) else _na_note("Revenue Growth (%)")
+            rev_ok = pd.notna(rev) and rev >= 12
+            rev_status = ok if rev_ok else (warn + " needs >12% YoY" if pd.notna(rev) else "pending data")
+            st.markdown(f"**Fundamental gate (Revenue Growth \u2014 YoY % from `Revenue Growth (%)`):** {rev_txt} \u2014 {rev_status}")
         if pd.notna(cmp_v) and pd.notna(dma50):
             if cmp_v >= dma50:
-                st.markdown(f"**Technical entry:** Trading **above 50 DMA** (₹{cmp_v:,.1f} vs ₹{dma50:,.1f}) ✅")
+                st.markdown(f"**Technical entry:** Trading **above 50 DMA** (CMP ₹{cmp_v:,.1f} vs 50 DMA ₹{dma50:,.1f}) \u2705")
             else:
-                st.markdown(f"**Technical entry:** Wait for breakout **above ₹{dma50:,.1f}** (CMP ₹{cmp_v:,.1f})")
+                st.markdown(f"**Technical entry:** Wait for breakout **above 50 DMA ₹{dma50:,.1f}** (CMP ₹{cmp_v:,.1f})")
         elif pd.notna(cmp_v):
-            st.markdown(f"**Technical entry:** CMP ₹{cmp_v:,.1f} — 50 DMA N/A")
+            st.markdown(f"**Technical entry:** CMP ₹{cmp_v:,.1f} — 50 DMA {_na_note('50 DMA')}")
+            st.caption("50 DMA not in current snapshot — requires price history.")
+        elif pd.notna(dma50):
+            st.markdown(f"**Technical entry:** 50 DMA ₹{dma50:,.1f} — CMP {_na_note('CMP')}")
         else:
-            st.markdown("**Technical entry:** CMP / 50 DMA N/A")
+            st.markdown("**Technical entry:** CMP / 50 DMA — not in current snapshot")
+            st.caption("**N/A** here means the field is absent from `data/nifty_smallcap_250_data.csv`. CMP and DMA need daily price history; add them in `scripts/fetch_data.py` to enable technical gates.")
 
     with col2:
         st.markdown("#### \u2696\ufe0f How Much to Buy")
-        st.metric(label="Target Allocation (Q)", value=f"{Q:.1f}%", delta=mult_label)
-        st.caption(f"Base weight {base_w:.1f}% × multiplier {mult:.1f} — capped at 8.0%")
-        if is_bfsi_sel:
-            st.markdown(f"**ROA:** {roa:.2f}%" if pd.notna(roa) else "**ROA:** N/A")
-            st.markdown(f"**ROE:** {roe:.1f}%" if pd.notna(roe) else "**ROE:** N/A")
+        if verdict in ("HARD PASS", "WATCHLIST"):
+            st.metric(label="Active Allocation", value="0.0%", delta="On hold — awaiting confirmation / no buy")
+            st.markdown(f"**Target on confirmation:** **{prospective_Q:.1f}%** (Base {base_w:.1f}% × {mult_label} → capped at 8.0%)")
+            st.caption("Sizing is prospective only until the verdict flips to BUY.")
         else:
-            st.markdown(f"**ROCE:** {roce:.1f}%" if pd.notna(roce) else "**ROCE:** N/A")
-            nd_txt = f"{netdebt:.2f}x" if pd.notna(netdebt) else "N/A"
-            ocf_txt = f"{ocf:.2f}x" if pd.notna(ocf) else "N/A"
+            st.metric(label="Target Allocation (Q)", value=f"{prospective_Q:.1f}%", delta=mult_label)
+            st.caption(f"Base weight {base_w:.1f}% × multiplier {mult:.1f} — capped at 8.0%")
+        missing_core = []
+        if pd.isna(roce):
+            missing_core.append("ROCE")
+        if pd.isna(netdebt):
+            missing_core.append("Net_Debt_EBITDA")
+        if pd.isna(ocf):
+            missing_core.append("OCF_PAT")
+        if pd.isna(roa):
+            missing_core.append("ROA")
+        if is_bfsi_sel:
+            st.markdown(f"**ROA:** {roa:.2f}%" if pd.notna(roa) else f"**ROA:** {_na_note('ROA')}")
+            st.markdown(f"**ROE:** {roe:.1f}%" if pd.notna(roe) else f"**ROE:** {_na_note('ROE')}")
+        else:
+            if pd.notna(roce):
+                st.markdown(f"**ROCE:** {roce:.1f}%")
+            else:
+                st.markdown(f"**ROCE:** {_na_note('ROCE (%) — this stock has no ROCE in Yahoo snapshot')}")
+            nd_txt = f"{netdebt:.2f}x" if pd.notna(netdebt) else _na_note("Net_Debt_EBITDA — requires balance-sheet debt & EBITDA")
+            ocf_txt = f"{ocf:.2f}x" if pd.notna(ocf) else _na_note("OCF_PAT — requires cash-flow statement")
             st.markdown(f"**Net Debt/EBITDA:** {nd_txt}")
             st.markdown(f"**OCF / PAT:** {ocf_txt}")
+        if missing_core:
+            st.caption(f"Note: {', '.join(missing_core)} not in current snapshot — quality multiplier falls back to baseline/excludes those checks. Extend `scripts/fetch_data.py` to ingest them.")
         pe_pct = df.loc[selected_row.name, "PE_Percentile"] if "PE_Percentile" in df.columns and selected_row.name in df.index else np.nan
         eps_pct = df.loc[selected_row.name, "EPS_Percentile"] if "EPS_Percentile" in df.columns and selected_row.name in df.index else np.nan
         ret_pct = df.loc[selected_row.name, "Return_Percentile"] if "Return_Percentile" in df.columns and selected_row.name in df.index else np.nan
-        st.markdown(f"**Percentiles (universe):** P/E {pe_pct:.0f}th · EPS {eps_pct:.0f}th · Return {ret_pct:.0f}th" if pd.notna(pe_pct) else "")
+        st.markdown(f"**Percentiles (universe, invariant):** P/E {pe_pct:.0f}th · EPS {eps_pct:.0f}th · Return {ret_pct:.0f}th" if pd.notna(pe_pct) else "")
 
     with col3:
         st.markdown("#### \U0001f6d1 When to Exit (Invalidation Rules)")
@@ -386,14 +385,26 @@ def render_micro_tab(df_universe: pd.DataFrame):
             if pd.notna(dma_ref):
                 st.markdown(f"**Technical trend:** Weekly close **below {dma_lbl}** (₹{dma_ref:,.1f}).")
             else:
-                st.markdown("**Technical trend:** Weekly close below 200 DMA (Core) — DMA N/A.")
+                st.markdown("**Technical trend:** Weekly close below 200 DMA (Core) — DMA N/A (no DMA in snapshot).")
         else:
             if pd.notna(dma50):
                 st.markdown(f"**Technical trend:** Daily close **below 50 DMA** (₹{dma50:,.1f}).")
             else:
-                st.markdown("**Technical trend:** Daily close below 50 DMA — DMA N/A.")
+                st.markdown("**Technical trend:** Daily close below 50 DMA — DMA not in snapshot.")
         if pd.notna(cmp_v):
             stop = cmp_v * 0.88
             st.markdown(f"**Capital loss floor:** Hard stop **₹{stop:,.1f}** (−12% from ₹{cmp_v:,.1f}).")
         else:
-            st.markdown("**Capital loss floor:** −12% stop — CMP N/A.")
+            st.markdown("**Capital loss floor:** −12% from CMP — CMP not in current snapshot, hard stop unavailable.")
+
+    st.divider()
+    try:
+        from src.data_loader import DATA_PATH
+        if DATA_PATH.exists():
+            mtime = datetime.fromtimestamp(DATA_PATH.stat().st_mtime).strftime("%d %b %Y, %H:%M")
+            st.caption(f"Data as of **{mtime}** · Universe **Nifty Smallcap 250** via **NSE India** (`niftyindices.com`) + fundamentals via **Yahoo Finance (`yfinance`)** · File `data/nifty_smallcap_250_data.csv` · Generated by `scripts/fetch_data.py` · Medians/percentiles are invariant (full valid universe, not filtered view).")
+        else:
+            st.caption("Source: Nifty Smallcap 250 via NSE India + Yahoo Finance. No local snapshot file found.")
+    except Exception:
+        st.caption("Source: Nifty Smallcap 250 via NSE India + Yahoo Finance.")
+    st.caption("**N/A / —** = field not present in the current snapshot. Available snapshot columns: `Market Cap (Cr)`, `P/E`, `P/B`, `EPS Growth 1Y/3Y (%)`, `Profit Growth 1Y/3Y (%)`, `Revenue Growth (%)`, `ROCE (%)`, `ROE (%)`, `1Y/3Y/5Y Returns`. Not yet ingested: `ROA`, `OCF_PAT`, `Net_Debt_EBITDA`, `CMP`, `50/200 DMA` — extend the fetch script to enable those gates.")
