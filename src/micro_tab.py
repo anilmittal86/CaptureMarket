@@ -145,6 +145,7 @@ def render_micro_tab(df_universe: pd.DataFrame):
 
     label_col = "Company" if "Company" in df_valid.columns else df_valid.columns[0]
     symbol_col = "NSE Symbol" if "NSE Symbol" in df_valid.columns else label_col
+    df["_label"] = df[label_col].astype(str) + " (" + df[symbol_col].astype(str) + ")"
     df_valid["_label"] = df_valid[label_col].astype(str) + " (" + df_valid[symbol_col].astype(str) + ")"
     options = ["-- Select a stock --"] + sorted(df_valid["_label"].dropna().unique().tolist())
     selected_label = st.selectbox("Search and select a stock", options, index=0)
@@ -154,6 +155,10 @@ def render_micro_tab(df_universe: pd.DataFrame):
         sel = df[df["_label"] == selected_label]
         if not sel.empty:
             selected_row = sel.iloc[0]
+        else:
+            sel = df_valid[df_valid["_label"] == selected_label]
+            if not sel.empty:
+                selected_row = sel.iloc[0]
 
     sizes = df_valid["1Y Return"].abs().fillna(10).clip(8, 80)
 
