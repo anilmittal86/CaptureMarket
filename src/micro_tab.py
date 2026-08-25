@@ -242,16 +242,16 @@ def render_micro_tab(df_universe: pd.DataFrame):
     quadrant = selected_row.get("Quadrant")
 
     if "Trap" in archetype:
-        st.error("VERDICT: HARD PASS — Multiple Compression Trap / Weak Solvency")
+        st.error("VERDICT: HARD PASS — Weak solvency / expensive vs growth — avoid / reduce")
         verdict = "HARD PASS"
     elif "Quality Compounder" in archetype:
-        st.success("VERDICT: CORE BUY — High Capital Efficiency Compounder at Fair Valuation")
+        st.success("VERDICT: CORE BUY — Efficient compounder at fair price")
         verdict = "CORE BUY"
     elif "Hyper-Growth" in archetype or "Turnaround" in archetype:
-        st.success("VERDICT: TACTICAL BUY — Operational Momentum Intact")
+        st.success("VERDICT: TACTICAL BUY — Momentum intact")
         verdict = "TACTICAL BUY"
     else:
-        st.warning("VERDICT: WATCHLIST / WAIT — Awaiting Topline Acceleration or Base Breakout")
+        st.warning("VERDICT: WATCHLIST / WAIT — Awaiting stronger earnings or better price")
         verdict = "WATCHLIST"
 
     if pd.notna(pe):
