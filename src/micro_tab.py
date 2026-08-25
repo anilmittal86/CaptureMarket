@@ -318,7 +318,13 @@ def render_micro_tab(df_universe: pd.DataFrame):
 
     with col1:
         st.markdown("#### \U0001f3af Whether to Buy")
-        st.markdown(f"**Quadrant:** {quadrant if pd.notna(quadrant) else 'N/A'}  ·  *invariant vs full universe*")
+        eps_med_txt = f"{MEDIAN_EPS_3Y:+.1f}%"
+        pe_med_txt = f"{MEDIAN_PE:.1f}x"
+        q_expl = ""
+        if pd.notna(eps3) and pd.notna(pe):
+            q_expl = f" · EPS {eps3:+.1f}% vs median {eps_med_txt}, P/E {pe:.1f}x vs median {pe_med_txt}"
+        st.markdown(f"**Quadrant:** {quadrant if pd.notna(quadrant) else 'N/A'}  ·  *P/E vs EPS 3Y (not Revenue){q_expl}*")
+        st.caption("Quadrant = valuation (P/E) vs earnings growth (EPS 3Y CAGR). Revenue 42% is topline, EPS is bottom-line — quadrant uses EPS.")
         st.markdown("**Valuations**")
         v1, v2, v3 = st.columns(3)
         with v1:
@@ -332,10 +338,20 @@ def render_micro_tab(df_universe: pd.DataFrame):
             st.metric("P/B", pb_txt, delta=pb_hint, delta_color="off")
             st.caption("Price ÷ Book")
         with v3:
-            peg_txt = f"{peg:.2f}" if pd.notna(peg) else "—"
-            peg_hint = "PEG" + (" \u2705 (≤1.5)" if pd.notna(peg) and peg <= 1.5 else " \u26a0\ufe0f (>1.5)" if pd.notna(peg) and peg > 1.5 else " (needs P/E & EPS 3Y)")
+            if pd.notna(peg):
+                peg_txt = f"{peg:.2f}"
+                peg_hint = "PEG \u2705 (≤1.5)" if peg <= 1.5 else "PEG \u26a0\ufe0f (>1.5) · expensive vs growth"
+            elif pd.notna(pe) and pd.notna(eps3) and eps3 <= 0:
+                peg_txt = "—"
+                peg_hint = f"PEG n/a · EPS {eps3:+.1f}% ≤0 (P/E {pe:.1f}x ÷ negative EPS = not meaningful)"
+            elif pd.notna(pe) and pd.isna(eps3):
+                peg_txt = "—"
+                peg_hint = "PEG n/a · EPS 3Y missing in Yahoo snapshot"
+            else:
+                peg_txt = "—"
+                peg_hint = "PEG needs P/E & positive EPS 3Y"
             st.metric("PEG", peg_txt, delta=peg_hint, delta_color="off")
-            st.caption("P/E ÷ EPS 3Y")
+            st.caption("P/E ÷ EPS 3Y · alternative: screener.in if EPS missing")
 
         st.markdown("**Growth**")
         g1, g2, g3 = st.columns(3)
