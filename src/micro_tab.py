@@ -33,10 +33,13 @@ def render_micro_tab(df_universe: pd.DataFrame):
                 if spec not in df.columns:
                     df[spec] = np.nan
 
-    for c in ["CMP", "50 DMA", "200 DMA", "OCF_PAT", "Net_Debt_EBITDA", "P/E", "P/B", "EPS Growth 3Y", "Revenue Growth", "ROCE", "ROE", "ROA", "1Y Return"]:
+    for c in ["CMP", "50 DMA", "200 DMA", "OCF_PAT", "Net_Debt_EBITDA", "Debt/Equity", "Current Ratio", "Interest Coverage", "P/E", "P/B", "EPS Growth 3Y", "Revenue Growth", "ROCE", "ROE", "ROA", "1Y Return"]:
         if c not in df.columns:
             df[c] = np.nan
         df[c] = pd.to_numeric(df[c], errors="coerce")
+    for c in ["Profit Growth 1Y (%)", "Profit Growth 1Y"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
 
     for c in ["Company", "NSE Symbol", "Sector", "Industry"]:
         if c not in df.columns:
@@ -296,45 +299,117 @@ def render_micro_tab(df_universe: pd.DataFrame):
     col1, col2, col3 = st.columns(3)
 
     def _na_note(col_name):
-        return f"— (not in current snapshot — requires `{col_name}` field)"
+        return f"— (not in current snapshot — requires `{col_name}`)"
+
+    def _val_badge(v, good, warn_thr=None, invert=False):
+        if pd.isna(v):
+            return "—"
+        if invert:
+            return "\u2705" if v <= good else ("\u26a0\ufe0f" if warn_thr is None or v <= warn_thr else "\U0001f534")
+        else:
+            return "\u2705" if v >= good else ("\u26a0\ufe0f" if warn_thr is not None and v >= warn_thr else "\U0001f534")
+
+    profit = selected_row.get("Profit Growth 1Y (%)") if "Profit Growth 1Y (%)" in df.columns else selected_row.get("Profit Growth 1Y")
+    if pd.isna(profit) and "Profit Growth 1Y (%)" not in df.columns:
+        profit = np.nan
+    debt_eq = selected_row.get("Debt/Equity")
+    curr_ratio = selected_row.get("Current Ratio")
+    int_cov = selected_row.get("Interest Coverage")
 
     with col1:
-        st.markdown("#### \U0001f3af When to Buy")
-        st.markdown(f"**Archetype:** `{archetype}`")
-        st.markdown(f"**Quadrant:** {quadrant if pd.notna(quadrant) else 'N/A'}")
+        st.markdown("#### \U0001f3af Whether to Buy")
+        st.markdown(f"**Quadrant:** {quadrant if pd.notna(quadrant) else 'N/A'}  ·  *invariant vs full universe*")
+        st.markdown("**Valuations**")
+        v1, v2, v3 = st.columns(3)
+        with v1:
+            pe_txt = f"{pe:.1f}x" if pd.notna(pe) else "—"
+            pe_hint = "P/E" + (" \u2705 (<25x)" if pd.notna(pe) and pe < 25 else " \u26a0\ufe0f (25-45x)" if pd.notna(pe) and pe <= 45 else " \U0001f534 (>45x)" if pd.notna(pe) else "")
+            st.metric("P/E", pe_txt, delta=pe_hint, delta_color="off")
+            st.caption("Price ÷ Earnings")
+        with v2:
+            pb_txt = f"{pb:.1f}x" if pd.notna(pb) else "—"
+            pb_hint = "P/B" + (" \u2705 (<3.5x)" if pd.notna(pb) and pb < 3.5 else " \U0001f534 (>3.5x)" if pd.notna(pb) else "")
+            st.metric("P/B", pb_txt, delta=pb_hint, delta_color="off")
+            st.caption("Price ÷ Book")
+        with v3:
+            peg_txt = f"{peg:.2f}" if pd.notna(peg) else "—"
+            peg_hint = "PEG" + (" \u2705 (≤1.5)" if pd.notna(peg) and peg <= 1.5 else " \u26a0\ufe0f (>1.5)" if pd.notna(peg) and peg > 1.5 else " (needs P/E & EPS 3Y)")
+            st.metric("PEG", peg_txt, delta=peg_hint, delta_color="off")
+            st.caption("P/E ÷ EPS 3Y")
+
+        st.markdown("**Growth**")
+        g1, g2, g3 = st.columns(3)
+        with g1:
+            eps_txt = f"{eps3:+.1f}%" if pd.notna(eps3) else "—"
+            st.metric("EPS 3Y CAGR", eps_txt, delta=("\u2705" if pd.notna(eps3) and eps3 >= 15 else "\u26a0\ufe0f" if pd.notna(eps3) else ""))
+            st.caption("EPS Growth 3Y")
+        with g2:
+            rev_txt = f"{rev:+.1f}%" if pd.notna(rev) else "—"
+            st.metric("Revenue YoY", rev_txt, delta=("\u2705 ≥12%" if pd.notna(rev) and rev >= 12 else "\U0001f534 <12%" if pd.notna(rev) else ""))
+            st.caption("from `Revenue Growth (%)`")
+        with g3:
+            prof_txt = f"{profit:+.1f}%" if pd.notna(profit) else "—"
+            st.metric("Profit YoY", prof_txt, delta=("\u2705" if pd.notna(profit) and profit > 0 else "\u26a0\ufe0f" if pd.notna(profit) else ""))
+            st.caption("Profit Growth 1Y")
+
+        st.markdown("**Solvency & Risk**  ·  *industry-aware*")
         if is_bfsi_sel:
-            pb_txt = f"{pb:.1f}x" if pd.notna(pb) else _na_note("P/B")
-            pe_txt = f"{pe:.1f}x" if pd.notna(pe) else _na_note("P/E")
-            st.markdown(f"**Valuation gate (BFSI):** P/E {pe_txt} · P/B {pb_txt}")
-            roa_txt = f"{roa:.2f}%" if pd.notna(roa) else _na_note("ROA")
-            ok = "\u2705"
-            warn = "\u26a0\ufe0f"
-            roa_status = ok if _ge(roa, 1.3) else (warn + " soft" if pd.notna(roa) else "pending data")
-            st.markdown(f"**Fundamental gate (BFSI \u2014 ROA):** {roa_txt} \u2014 {roa_status}")
+            s1, s2, s3 = st.columns(3)
+            with s1:
+                roa_txt = f"{roa:.2f}%" if pd.notna(roa) else "—"
+                roa_delta = "\u2705 ≥1.5% (strong)" if pd.notna(roa) and roa >= 1.5 else "\u26a0\ufe0f <1.1% trap" if pd.notna(roa) and roa < 1.1 else "\u2705 ≥1.3% ok" if pd.notna(roa) else "needs ROA"
+                st.metric("ROA", roa_txt, delta=roa_delta, delta_color="off")
+                st.caption("Return on Assets")
+            with s2:
+                de_txt = f"{debt_eq:.2f}x" if pd.notna(debt_eq) else "—"
+                de_delta = "\u2705 ≤1.0x" if pd.notna(debt_eq) and debt_eq <= 1.0 else "\u26a0\ufe0f >1.5x" if pd.notna(debt_eq) else "—"
+                st.metric("Debt/Equity", de_txt, delta=de_delta, delta_color="off")
+                st.caption("Leverage")
+            with s3:
+                cr_txt = f"{curr_ratio:.2f}x" if pd.notna(curr_ratio) else "—"
+                cr_delta = "\u2705 ≥1.5x" if pd.notna(curr_ratio) and curr_ratio >= 1.5 else "\u26a0\ufe0f <1.2x" if pd.notna(curr_ratio) else "—"
+                st.metric("Current Ratio", cr_txt, delta=cr_delta, delta_color="off")
+                st.caption("Liquidity")
         else:
-            peg_txt = f"{peg:.2f}" if pd.notna(peg) else _na_note("PEG = P/E \u00f7 EPS Growth 3Y")
-            peg_ok = pd.notna(peg) and peg <= 1.5
-            ok = "\u2705"
-            warn = "\u26a0\ufe0f"
-            peg_status = ok + " fair (\u22641.5)" if peg_ok else (warn + " stretched (>1.5)" if pd.notna(peg) else "pending data (needs P/E & EPS Growth 3Y)")
-            st.markdown(f"**Valuation gate (Non-BFSI \u2014 PEG):** {peg_txt} \u2014 {peg_status}")
-            rev_txt = f"{rev:+.1f}%" if pd.notna(rev) else _na_note("Revenue Growth (%)")
-            rev_ok = pd.notna(rev) and rev >= 12
-            rev_status = ok if rev_ok else (warn + " needs >12% YoY" if pd.notna(rev) else "pending data")
-            st.markdown(f"**Fundamental gate (Revenue Growth \u2014 YoY % from `Revenue Growth (%)`):** {rev_txt} \u2014 {rev_status}")
+            s1, s2, s3 = st.columns(3)
+            with s1:
+                de_txt = f"{debt_eq:.2f}x" if pd.notna(debt_eq) else "—"
+                de_delta = "\u2705 ≤0.5x" if pd.notna(debt_eq) and debt_eq <= 0.5 else "\u2705 ≤1.0x" if pd.notna(debt_eq) and debt_eq <= 1.0 else "\U0001f534 >1.5x" if pd.notna(debt_eq) else "needs Debt/Equity"
+                st.metric("Debt/Equity", de_txt, delta=de_delta, delta_color="off")
+                st.caption("Leverage")
+            with s2:
+                nd_txt = f"{netdebt:.2f}x" if pd.notna(netdebt) else "—"
+                nd_delta = "\u2705 ≤1.5x safe" if pd.notna(netdebt) and netdebt <= 1.5 else "\U0001f534 >1.5x stressed" if pd.notna(netdebt) else "needs Net Debt/EBITDA"
+                st.metric("Net Debt/EBITDA", nd_txt, delta=nd_delta, delta_color="off")
+                st.caption("Solvency")
+            with s3:
+                ic_txt = f"{int_cov:.1f}x" if pd.notna(int_cov) else "—"
+                ic_delta = "\u2705 ≥3.0x" if pd.notna(int_cov) and int_cov >= 3 else "\u26a0\ufe0f <2.0x" if pd.notna(int_cov) else "needs Interest Coverage"
+                if pd.isna(int_cov) and pd.notna(curr_ratio):
+                    ic_txt = f"{curr_ratio:.2f}x"
+                    ic_delta = "\u2705 ≥1.5x" if curr_ratio >= 1.5 else "\u26a0\ufe0f <1.2x"
+                    st.metric("Current Ratio", ic_txt, delta=ic_delta, delta_color="off")
+                    st.caption("Liquidity (fallback)")
+                else:
+                    st.metric("Interest Coverage", ic_txt, delta=ic_delta, delta_color="off")
+                    st.caption("EBIT ÷ Interest")
+
+        st.markdown("**Technical entry**")
         if pd.notna(cmp_v) and pd.notna(dma50):
             if cmp_v >= dma50:
-                st.markdown(f"**Technical entry:** Trading **above 50 DMA** (CMP ₹{cmp_v:,.1f} vs 50 DMA ₹{dma50:,.1f}) \u2705")
+                st.success(f"Above 50 DMA — CMP ₹{cmp_v:,.1f} vs 50 DMA ₹{dma50:,.1f} \u2705")
             else:
-                st.markdown(f"**Technical entry:** Wait for breakout **above 50 DMA ₹{dma50:,.1f}** (CMP ₹{cmp_v:,.1f})")
+                st.warning(f"Below 50 DMA — wait for breakout above ₹{dma50:,.1f} (CMP ₹{cmp_v:,.1f})")
+            if pd.notna(dma200):
+                st.caption(f"200 DMA ₹{dma200:,.1f} · {'above' if cmp_v >= dma200 else 'below'} long trend")
         elif pd.notna(cmp_v):
-            st.markdown(f"**Technical entry:** CMP ₹{cmp_v:,.1f} — 50 DMA {_na_note('50 DMA')}")
+            st.info(f"CMP ₹{cmp_v:,.1f} — 50 DMA {_na_note('50 DMA')}")
             st.caption("50 DMA not in current snapshot — requires price history.")
         elif pd.notna(dma50):
-            st.markdown(f"**Technical entry:** 50 DMA ₹{dma50:,.1f} — CMP {_na_note('CMP')}")
+            st.info(f"50 DMA ₹{dma50:,.1f} — CMP {_na_note('CMP')}")
         else:
-            st.markdown("**Technical entry:** CMP / 50 DMA — not in current snapshot")
-            st.caption("**N/A** here means the field is absent from `data/nifty_smallcap_250_data.csv`. CMP and DMA need daily price history; add them in `scripts/fetch_data.py` to enable technical gates.")
+            st.warning("CMP / 50 DMA — not in current snapshot")
+            st.caption("**N/A** = field absent from `data/nifty_smallcap_250_data.csv`. CMP and DMA need daily price history; now auto-fetched for new snapshots — re-run `python scripts/fetch_data.py` and reload.")
 
     with col2:
         st.markdown("#### \u2696\ufe0f How Much to Buy")
