@@ -219,7 +219,7 @@ def muted_strip(items: list[tuple[str, str]]) -> None:
 
 
 def quad_tile(name: str, count: int, color: str, key: str) -> None:
-    """Clickable quadrant tile that deep-links into the Micro map."""
+    """Quadrant tile — Explore shows table inline on Macro (no navigation)."""
     st.markdown(
         f"""
         <div class="quad-tile" style="background:{color};">
@@ -230,8 +230,5 @@ def quad_tile(name: str, count: int, color: str, key: str) -> None:
         unsafe_allow_html=True,
     )
     if st.button("Explore →", key=key, use_container_width=True):
+        st.session_state["macro_selected_quadrant"] = name
         st.session_state["micro_preset_quadrant"] = [name]
-        try:
-            st.switch_page("pages/3_Micro_Analysis.py")
-        except Exception:
-            pass  # non-app entry points cannot navigate; preset still applies

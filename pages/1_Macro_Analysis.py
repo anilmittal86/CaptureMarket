@@ -18,12 +18,14 @@ sys.path.insert(0, str(ROOT))
 from src.analytics import (
     QUADRANTS,
     QUADRANT_COLORS,
+    assign_quadrants,
     cap_insights,
     growth_insights,
     liquidity_insights,
     market_regime,
     market_verdict,
     quadrant_counts,
+    universe_medians,
 )
 from src.data_loader import get_data
 from src.ui import cr_fmt, evaluation_table, inject_css, insight_banner, muted_strip, quad_tile, stat_card, verdict_banner
@@ -187,12 +189,47 @@ else:
 # ===========================================================================
 st.divider()
 qc = quadrant_counts(df)
-st.markdown('<div class="section-title">Where value meets growth — click to explore on the map</div>', unsafe_allow_html=True)
-st.caption("Split at universe medians (P/E × EPS 3Y). Counts cover the full 250-company universe.")
+st.markdown('<div class="section-title">Where value meets growth — click to explore</div>', unsafe_allow_html=True)
+st.caption("Split at universe medians (P/E × EPS 3Y). Click Explore to see the table inline — counts cover the full 250-company universe.")
 row1, row2 = st.columns(2, gap="small"), st.columns(2, gap="small")
 for i, qname in enumerate(QUADRANTS):
     with (row1 if i < 2 else row2)[i % 2]:
         quad_tile(qname, qc[qname], QUADRANT_COLORS[qname], key=f"quad_{i}")
+
+if st.session_state.get("macro_selected_quadrant"):
+    sel_q = st.session_state["macro_selected_quadrant"]
+    st.markdown(f'<div style="margin-top:12px;padding:10px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;"><b>Showing: {sel_q}</b> — {qc.get(sel_q, 0)} companies · <span style="color:#64748B">split at P/E × EPS 3Y medians</span></div>', unsafe_allow_html=True)
+    c_clear, _ = st.columns([1, 5])
+    with c_clear:
+        if st.button("Clear filter ✕", key="quad_clear"):
+            st.session_state["macro_selected_quadrant"] = None
+            st.rerun()
+    try:
+        med_x, med_y = universe_medians(df, "P/E", "EPS Growth 3Y (%)")
+        df_q = df.copy()
+        df_q["Quadrant"] = assign_quadrants(df_q, "P/E", "EPS Growth 3Y (%)", med_x, med_y)
+        view = df_q[df_q["Quadrant"] == sel_q].copy()
+        q_cols = [c for c in ["Company", "NSE Symbol", "Sector", "Market Cap (Cr)", "P/E", "P/B", "EPS Growth 3Y (%)", "Revenue Growth (%)", "ROCE (%)", "1Y Return (%)"] if c in view.columns]
+        if not view.empty:
+            st.dataframe(
+                view[q_cols].sort_values("P/E"),
+                hide_index=True,
+                width="stretch",
+                height=380,
+                column_config={
+                    "Market Cap (Cr)": st.column_config.NumberColumn(format="%.0f"),
+                    "P/E": st.column_config.NumberColumn(format="%.1fx"),
+                    "P/B": st.column_config.NumberColumn(format="%.1fx"),
+                    "EPS Growth 3Y (%)": st.column_config.NumberColumn(format="%+.1f%%"),
+                    "Revenue Growth (%)": st.column_config.NumberColumn(format="%+.1f%%"),
+                    "ROCE (%)": st.column_config.NumberColumn(format="%.1f%%"),
+                    "1Y Return (%)": st.column_config.NumberColumn(format="%+.1f%%"),
+                },
+            )
+        else:
+            st.info("No companies in this quadrant for the current snapshot.")
+    except Exception as e:
+        st.warning(f"Could not build quadrant table: {e}")
 
 # ===========================================================================
 # Zone 3: SECOND-ORDER CONTEXT - deliberately small and muted
