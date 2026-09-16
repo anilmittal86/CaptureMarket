@@ -43,11 +43,36 @@ except FileNotFoundError as e:
     st.stop()
 
 # ===========================================================================
-# Zone 1a: MARKET VERDICT - the one-line answer at the very top
+# Zone 1a: MARKET VERDICT - plain takeaway + 3 scannable cards
 # ===========================================================================
 vd = market_verdict(df)
 if vd.get("available"):
-    verdict_banner(vd["headline"], vd["sentence"], vd["mos_line"], vd["tone"])
+    verdict_banner(vd["headline"], vd["sentence"], "", vd["tone"])
+    hist = vd.get("hist_ctx", {})
+    peer_prem = vd.get("peer_premium", float("nan"))
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        prem5 = hist.get("premium_5y", float("nan")) if isinstance(hist, dict) else float("nan")
+        pct5 = hist.get("pct_5y")
+        med5 = hist.get("median_5y", float("nan")) if isinstance(hist, dict) else float("nan")
+        if hist.get("available") and pct5 is not None:
+            val = f"{prem5:+.0f}%"
+            sub = f"{vd['idx_pe']:.1f}x vs 5Y {med5:.1f}x · {pct5:.0f}th %ile"
+            tone = "warn" if prem5 > 20 or pct5 > 80 else ("pos" if prem5 < 0 else "neutral")
+            st.metric("Vs History (5Y)", val, sub, delta_color="off", border=True)
+        else:
+            st.metric("Vs History", "—", "collecting", border=True)
+    with c2:
+        peer_pe = vd.get("peer_pe", float("nan"))
+        peer_lab = f"{peer_prem:+.0f}%" if peer_prem == peer_prem else "—"
+        peer_sub = f"{vd['idx_pe']:.1f}x vs Nifty 50 {peer_pe:.1f}x" if peer_pe == peer_pe else "peer collecting"
+        tone2 = "warn" if peer_prem == peer_prem and peer_prem > 25 else ("pos" if peer_prem == peer_prem and peer_prem < 0 else "neutral")
+        st.metric("Vs Nifty 50", peer_lab, peer_sub, delta_color="off", border=True)
+    with c3:
+        sg = vd.get("structural_growth", float("nan"))
+        st.metric("Real Growth", f"{sg:+.1f}%", f"nominal {vd.get('nominal_growth', 0):+.1f}% − infl", delta_color="off", border=True)
+    with st.expander("How this math works"):
+        st.caption(f"{vd['mos_line']} · {vd['loss_making']} loss-making excluded · cap-weighted P/E `sum(cap)/sum(cap/P/E)` · history `data/index_pepb/nifty_*.csv`")
 else:
     insight_banner(
         "Market Verdict unavailable: too few companies have both a positive P/E "
@@ -56,32 +81,16 @@ else:
     )
 
 # ===========================================================================
-# Zone 1b: SNAPSHOT — valuations vs history + vs Nifty 50
+# Zone 1b: DETAILS — P/B and the proof table
 # ===========================================================================
 if vd.get("available"):
     hist = vd.get("hist_ctx", {})
-    st.markdown('<div class="hero-title">Market Snapshot — Smallcap 250 as one index</div>', unsafe_allow_html=True)
-    s1, s2, s3, s4 = st.columns(4)
-    with s1:
-        prem5 = hist.get("premium_5y", float("nan")) if isinstance(hist, dict) else float("nan")
-        med5 = hist.get("median_5y", float("nan")) if isinstance(hist, dict) else float("nan")
-        pct5 = hist.get("pct_5y")
-        sub = f"{prem5:+.0f}% vs 5Y median {med5:.1f}x · {pct5:.0f}th %ile" if hist.get("available") and pct5 is not None else "history collecting"
-        tone = "warn" if hist.get("available") and (prem5 > 20 or (pct5 is not None and pct5 > 80)) else ("pos" if hist.get("available") and prem5 < 0 else "neutral")
-        stat_card("Index P/E vs History", f"{vd['idx_pe']:.1f}x", sub, tone)
-    with s2:
+    c_pb, c_nom = st.columns(2)
+    with c_pb:
         pb_txt = f"{vd.get('pb_med', float('nan')):.1f}x" if vd.get("pb_med") == vd.get("pb_med") else "—"
-        hist_pb = hist.get("premium_5y", 0) if isinstance(hist, dict) else 0
-        stat_card("P/B vs History", pb_txt, f"{hist_pb:+.0f}% vs 5Y P/B median" if hist.get("available") else "history collecting", "neutral")
-    with s3:
-        peer_pe = vd.get("peer_pe", float("nan"))
-        peer_prem = vd.get("peer_premium", float("nan"))
-        sub_peer = f"{peer_prem:+.0f}% premium — Nifty 50 {peer_pe:.1f}x" if peer_pe == peer_pe else "peer collecting"
-        tone_peer = "warn" if peer_prem == peer_prem and peer_prem > 25 else ("pos" if peer_prem == peer_prem and peer_prem < 0 else "neutral")
-        stat_card("Smallcap vs Nifty 50", f"{peer_prem:+.0f}%", sub_peer, tone_peer)
-    with s4:
-        sg = vd.get("structural_growth", float("nan"))
-        stat_card("Real Growth", f"{sg:+.1f}%", f"nominal {vd.get('nominal_growth', 0):+.1f}% − {vd.get('inflation', 5):.0f}% infl", "pos" if sg == sg and sg > 0 else "warn")
+        stat_card("P/B (median)", pb_txt, "price-to-book — complements P/E when earnings are cyclical", "neutral")
+    with c_nom:
+        stat_card("Nominal Growth", f"{vd.get('nominal_growth', 0):+.1f}%", f"median profit 3Y CAGR · real {vd.get('structural_growth', 0):+.1f}% after infl", "pos" if vd.get("structural_growth", 0) > 0 else "warn")
 
     st.markdown('<div class="section-title">Valuation check — vs own history and vs broad market</div>', unsafe_allow_html=True)
     peer_pe = vd.get("peer_pe", float("nan"))

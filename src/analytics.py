@@ -268,19 +268,16 @@ def market_verdict(df: pd.DataFrame) -> dict:
     else:
         tier, headline, tone = "fail", "FAIL — PRICED FOR PERFECTION vs history and vs Nifty 50", "neg"
 
-    sentence = (
-        f"As one index, Smallcap 250 at <b>{idx_pe:.1f}x</b> (P/B {pb_med:.1f}x) — "
-        f"vs 5Y median <b>{ctx_small['median_5y']:.1f}x</b> ({ctx_small['premium_5y']:+.0f}% premium, {ctx_small['pct_5y']:.0f}th %ile) — "
-        f"and vs Nifty 50 <b>{peer_pe:.1f}x</b> ({peer_premium:+.0f}% premium). "
-        f"Real growth {structural_growth:+.1f}% ({src_label} {nominal_growth:+.1f}% nominal − {INFLATION:.0f}% infl)."
-    )
+    if ctx_small.get("available"):
+        hist_word = f"{abs(ctx_small['premium_5y']):.0f}% cheaper than usual" if ctx_small["premium_5y"] < -5 else f"{ctx_small['premium_5y']:+.0f}% vs usual"
+    else:
+        hist_word = "fairly valued vs history"
+    peer_word = f"{abs(peer_premium):.0f}% pricier than Nifty 50" if peer_premium == peer_premium and abs(peer_premium) >= 3 else "in line with Nifty 50"
+    sentence = f"Smallcaps are {hist_word}, {peer_word}, and growing at {structural_growth:+.1f}% real."
     if not ctx_small["available"]:
-        sentence = (
-            f"As one index, Smallcap 250 at <b>{idx_pe:.1f}x</b> (P/B {pb_med:.1f}x) vs Nifty 50 <b>{peer_pe:.1f}x</b> ({peer_premium:+.0f}% premium). "
-            f"History collecting — 5Y median will appear after backfill. Real growth {structural_growth:+.1f}% ({src_label})."
-        )
+        sentence = f"Smallcap 250 at {idx_pe:.1f}x vs Nifty 50 {peer_pe:.1f}x ({peer_premium:+.0f}% premium). Real growth {structural_growth:+.1f}% — history collecting."
 
-    mos_line = f"Valuation vs history {'✅' if val_hist_pass else '❌'} · vs Nifty 50 {'✅' if peer_pass else '❌'} · Growth {'✅' if growth_pass else '❌'} — {hist_detail} | {peer_detail}"
+    mos_line = f"Valuation vs history {'✅' if val_hist_pass else '❌'} · vs Nifty 50 {'✅' if peer_pass else '❌'} · Growth {'✅' if growth_pass else '❌'}"
 
     out.update(
         {
