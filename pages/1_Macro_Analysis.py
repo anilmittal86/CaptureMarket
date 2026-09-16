@@ -189,8 +189,12 @@ else:
 # ===========================================================================
 st.divider()
 qc = quadrant_counts(df)
+try:
+    _med_x, _med_y = universe_medians(df, "P/E", "EPS Growth 3Y (%)")
+except Exception:
+    _med_x, _med_y = float("nan"), float("nan")
 st.markdown('<div class="section-title">Where value meets growth — click to explore</div>', unsafe_allow_html=True)
-st.caption("Split at universe medians (P/E × EPS 3Y). Click Explore to see the table inline — counts cover the full 250-company universe.")
+st.caption(f"Split at universe medians **P/E {_med_x:.1f}x** × **EPS 3Y {_med_y:.1f}%** (EPS, not Revenue — Revenue is topline). Click Explore to see table inline — 206 plotted / 250 total (44 missing P/E or EPS). Low Growth = < {_med_y:.1f}% EPS 3Y · borderline ±2pp (e.g., 16.6% is 1.1pp below median, still decent).")
 row1, row2 = st.columns(2, gap="small"), st.columns(2, gap="small")
 for i, qname in enumerate(QUADRANTS):
     with (row1 if i < 2 else row2)[i % 2]:
@@ -198,7 +202,7 @@ for i, qname in enumerate(QUADRANTS):
 
 if st.session_state.get("macro_selected_quadrant"):
     sel_q = st.session_state["macro_selected_quadrant"]
-    st.markdown(f'<div style="margin-top:12px;padding:10px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;"><b>Showing: {sel_q}</b> — {qc.get(sel_q, 0)} companies · <span style="color:#64748B">split at P/E × EPS 3Y medians</span></div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="margin-top:12px;padding:10px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;"><b>Showing: {sel_q}</b> — {qc.get(sel_q, 0)} companies · <span style="color:#64748B">P/E {_med_x:.1f}x × EPS {_med_y:.1f}% medians · High/Low Growth = EPS 3Y vs median (Revenue not used)</span></div>', unsafe_allow_html=True)
     c_clear, _ = st.columns([1, 5])
     with c_clear:
         if st.button("Clear filter ✕", key="quad_clear"):
