@@ -1,0 +1,51 @@
+name: self-correct
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 */6 * * *"  # every 6h — catches Streamlit Cloud drift
+  workflow_dispatch:
+
+jobs:
+  observe-fix-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install -r requirements.txt
+      - name: Observe — AppTest all pages
+        id: observe
+        run: |
+          python scripts/self_correct.py --loop 3 2>&1 | tee self_correct.log
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+        continue-on-error: true
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: self-correct-log
+          path: self_correct.log
+      - name: Auto-fix & push (only on failure, deterministic fixes only)
+        if: steps.observe.outputs.exit_code != '0'
+        run: |
+          python scripts/self_correct.py --loop 3 --push 2>&1 | tee self_correct_fix.log
+      - name: Comment on PR with hint (if LLM needed)
+        if: failure()
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            Self-correct loop found a failure with no deterministic fix.
+            Run locally: `python scripts/self_correct.py` and pipe the log to your LLM fixer,
+            or trigger `opencode --prompt "fix the AppTest failure"`.
