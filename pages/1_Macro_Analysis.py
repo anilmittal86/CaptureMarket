@@ -39,6 +39,14 @@ with cap_l:
     st.caption("Nifty Smallcap 250 · one screen: does growth justify the price?")
 with cap_r:
     st.markdown("[📖 What do these numbers mean?](/Guide)", unsafe_allow_html=False)
+try:
+    from datetime import datetime
+    from src.data_loader import DATA_PATH
+    if DATA_PATH.exists():
+        _mtime = datetime.fromtimestamp(DATA_PATH.stat().st_mtime).strftime("%d %b %Y")
+        st.caption(f"Data snapshot: **{_mtime}** · P/E = Yahoo `trailingPE` (TTM consolidated) — Screener/others may differ (standalone vs consolidated, TTM window). Re-run `scripts/fetch_data.py` to refresh.")
+except Exception:
+    pass
 
 try:
     df = get_data()
