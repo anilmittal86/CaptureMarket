@@ -19,7 +19,9 @@ def inject_css() -> None:
         .kpi-label {font-size: 0.78rem; font-weight: 600; color: #64748B;
                    text-transform: uppercase; letter-spacing: 0.04em;}
         .kpi-value {font-size: 1.55rem; font-weight: 700; color: #0F172A; margin-top: 2px;}
-        .kpi-sub {font-size: 0.8rem; color: #94A3B8; margin-top: 2px;}
+        .kpi-sub {font-size: 0.82rem; color: #475569; margin-top: 6px; line-height: 1.55;}
+        .kpi-sub b {color: #0F172A; font-weight: 700;}
+        .kpi-sub .muted {color: #94A3B8; font-weight: 400;}
         .pos {color: #16A34A;} .neg {color: #DC2626;} .warn {color: #D97706;}
         .quad-badge {
             display: inline-block; padding: 4px 12px; border-radius: 999px;

@@ -19,6 +19,8 @@ from src.analytics import (
     QUADRANTS,
     QUADRANT_COLORS,
     cap_insights,
+    growth_insights,
+    liquidity_insights,
     market_regime,
     market_verdict,
     quadrant_counts,
@@ -48,31 +50,87 @@ except FileNotFoundError as e:
 vd = market_verdict(df)
 if vd.get("available"):
     verdict_banner(vd["headline"], vd["sentence"], "", vd["tone"])
-    hist = vd.get("hist_ctx", {})
+    hist = vd.get("hist_ctx", {}) if isinstance(vd.get("hist_ctx"), dict) else {}
     peer_prem = vd.get("peer_premium", float("nan"))
+    peer_pe = vd.get("peer_pe", float("nan"))
+    prem5 = hist.get("premium_5y", float("nan")) if isinstance(hist, dict) else float("nan")
+    pct5 = hist.get("pct_5y")
+    med5 = hist.get("median_5y", float("nan")) if isinstance(hist, dict) else float("nan")
+    idx_pe = vd.get("idx_pe", float("nan"))
+    gi = growth_insights(df)
+    li = liquidity_insights(df)
+
+    if hist.get("available") and pct5 is not None and peer_pe == peer_pe:
+        if prem5 < -15:
+            v_verdict, v_tone = "Low", "pos"
+        elif vd.get("val_hist_pass") and vd.get("peer_pass"):
+            v_verdict, v_tone = "Reasonable", "pos"
+        elif not vd.get("val_hist_pass") and not vd.get("peer_pass"):
+            v_verdict, v_tone = "High", "neg"
+        else:
+            v_verdict, v_tone = "Elevated", "warn"
+        v_sub = (
+            f"<div><span class='muted'>History:</span> <b>{idx_pe:.1f}x</b> <span class='muted'>vs 5Y median</span> <b>{med5:.1f}x</b></div>"
+            f"<div><b>{prem5:+.0f}%</b> <span class='muted'>vs history</span> · <b>{pct5:.0f}th</b> <span class='muted'>percentile</span></div>"
+            f"<div style='margin-top:4px'><span class='muted'>Peer:</span> <b>{idx_pe:.1f}x</b> <span class='muted'>vs Nifty 50</span> <b>{peer_pe:.1f}x</b> · <b>{peer_prem:+.0f}%</b></div>"
+        )
+    elif hist.get("available") and pct5 is not None:
+        if prem5 < -15:
+            v_verdict, v_tone = "Low", "pos"
+        elif vd.get("val_hist_pass"):
+            v_verdict, v_tone = "Reasonable", "pos"
+        else:
+            v_verdict, v_tone = "High", "neg"
+        v_sub = (
+            f"<div><span class='muted'>History:</span> <b>{idx_pe:.1f}x</b> <span class='muted'>vs 5Y median</span> <b>{med5:.1f}x</b></div>"
+            f"<div><b>{prem5:+.0f}%</b> <span class='muted'>vs history</span> · <b>{pct5:.0f}th</b> <span class='muted'>percentile</span></div>"
+        )
+    elif peer_pe == peer_pe:
+        v_verdict, v_tone = ("Reasonable", "pos") if vd.get("peer_pass") else ("High", "neg")
+        v_sub = f"<div><span class='muted'>Peer:</span> <b>{idx_pe:.1f}x</b> <span class='muted'>vs Nifty 50</span> <b>{peer_pe:.1f}x</b> · <b>{peer_prem:+.0f}%</b></div>"
+    else:
+        v_verdict, v_tone, v_sub = "—", "neutral", "<span class='muted'>collecting history & peer</span>"
+
+    sg = vd.get("structural_growth", float("nan"))
+    nom = vd.get("nominal_growth", float("nan"))
+    infl = vd.get("inflation", 5)
+    eps_breadth = gi.get("eps", {}).get("pos_pct", float("nan")) if isinstance(gi, dict) else float("nan")
+    prof_breadth = gi.get("profit", {}).get("pos_pct", float("nan")) if isinstance(gi, dict) else float("nan")
+    breadth = prof_breadth if prof_breadth == prof_breadth and prof_breadth > 0 else eps_breadth
+    if sg != sg:
+        g_verdict, g_tone, g_sub = "—", "neutral", "<span class='muted'>collecting</span>"
+    elif sg <= 0:
+        g_verdict, g_tone = "Low", "neg"
+        g_sub = f"<div><b>{sg:+.1f}%</b> <span class='muted'>real</span> <span class='muted'>(</span><b>{nom:+.1f}%</b> <span class='muted'>nominal − {infl:.0f}% inflation)</span></div><div><b>{breadth:.0f}%</b> <span class='muted'>of companies growing</span></div>"
+    elif sg < 3 or (breadth == breadth and breadth < 45):
+        g_verdict, g_tone = "Moderate", "warn"
+        g_sub = f"<div><b>{sg:+.1f}%</b> <span class='muted'>real</span> <span class='muted'>(</span><b>{nom:+.1f}%</b> <span class='muted'>nominal − {infl:.0f}% inflation)</span></div><div><b>{breadth:.0f}%</b> <span class='muted'>of companies growing</span></div>"
+    else:
+        g_verdict, g_tone = "High", "pos"
+        g_sub = f"<div><b>{sg:+.1f}%</b> <span class='muted'>real</span> <span class='muted'>(</span><b>{nom:+.1f}%</b> <span class='muted'>nominal − {infl:.0f}% inflation)</span></div><div><b>{breadth:.0f}%</b> <span class='muted'>of companies growing</span></div>"
+
+    if li is None:
+        l_verdict, l_tone, l_sub = "—", "neutral", "<span class='muted'>collecting turnover data</span>"
+    else:
+        l_verdict, l_tone = li["verdict"], li["tone"]
+        if l_verdict == "Healthy":
+            l_verdict, l_tone = "Reasonable", "pos"
+        elif l_verdict == "Tight":
+            l_verdict, l_tone = "Moderate", "warn"
+        else:
+            l_verdict, l_tone = "Stressed", "neg"
+        l_sub = f"<div><span class='muted'>Median</span> <b>{li['median']:.0f} Cr</b><span class='muted'>/day</span></div><div><b>{li['illiquid_n']}</b> <span class='muted'>names &lt;5 Cr</span> · <b>{li['illiquid_pct']:.0f}%</b> <span class='muted'>illiquid</span></div>"
+
+    st.markdown('<div class="section-title">Valuation · Growth · Liquidity — at a glance</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     with c1:
-        prem5 = hist.get("premium_5y", float("nan")) if isinstance(hist, dict) else float("nan")
-        pct5 = hist.get("pct_5y")
-        med5 = hist.get("median_5y", float("nan")) if isinstance(hist, dict) else float("nan")
-        if hist.get("available") and pct5 is not None:
-            val = f"{prem5:+.0f}%"
-            sub = f"{vd['idx_pe']:.1f}x vs 5Y {med5:.1f}x · {pct5:.0f}th %ile"
-            tone = "warn" if prem5 > 20 or pct5 > 80 else ("pos" if prem5 < 0 else "neutral")
-            st.metric("Vs History (5Y)", val, sub, delta_color="off", border=True)
-        else:
-            st.metric("Vs History", "—", "collecting", border=True)
+        stat_card("Valuation", v_verdict, v_sub, v_tone)
     with c2:
-        peer_pe = vd.get("peer_pe", float("nan"))
-        peer_lab = f"{peer_prem:+.0f}%" if peer_prem == peer_prem else "—"
-        peer_sub = f"{vd['idx_pe']:.1f}x vs Nifty 50 {peer_pe:.1f}x" if peer_pe == peer_pe else "peer collecting"
-        tone2 = "warn" if peer_prem == peer_prem and peer_prem > 25 else ("pos" if peer_prem == peer_prem and peer_prem < 0 else "neutral")
-        st.metric("Vs Nifty 50", peer_lab, peer_sub, delta_color="off", border=True)
+        stat_card("Growth", g_verdict, g_sub, g_tone)
     with c3:
-        sg = vd.get("structural_growth", float("nan"))
-        st.metric("Real Growth", f"{sg:+.1f}%", f"nominal {vd.get('nominal_growth', 0):+.1f}% − infl", delta_color="off", border=True)
+        stat_card("Liquidity", l_verdict, l_sub, l_tone)
     with st.expander("How this math works"):
-        st.caption(f"{vd['mos_line']} · {vd['loss_making']} loss-making excluded · cap-weighted P/E `sum(cap)/sum(cap/P/E)` · history `data/index_pepb/nifty_*.csv`")
+        st.caption(f"{vd['mos_line']} · {vd['loss_making']} loss-making excluded · cap-weighted P/E `sum(cap)/sum(cap/P/E)` · targets: Valuation <+20% & <80th %ile & <+25% vs Nifty 50 = Reasonable · Growth >0% real = Reasonable · Liquidity <20% illiquid = Reasonable")
 else:
     insight_banner(
         "Market Verdict unavailable: too few companies have both a positive P/E "
