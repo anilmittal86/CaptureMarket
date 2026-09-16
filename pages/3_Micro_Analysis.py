@@ -24,8 +24,8 @@ except FileNotFoundError as e:
     st.stop()
 
 if "micro_preset_quadrant" in st.session_state:
-    preset = st.session_state.pop("micro_preset_quadrant", None)
+    preset = st.session_state.get("micro_preset_quadrant")
     if preset:
-        st.info(f"Deep-linked quadrant filter from Macro: {', '.join(preset)} — all quadrants remain visible on the map; use the cockpit to inspect stocks inside that quadrant.")
+        st.info(f"Deep-linked quadrant filter from Macro: {', '.join(preset)} — table below is pre-filtered; clear the multiselect to see all quadrants.")
 
 render_micro_tab(df)

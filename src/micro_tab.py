@@ -190,26 +190,64 @@ def render_micro_tab(df_universe: pd.DataFrame):
             parts.append(f"{lbl}: {txt}")
         hover_parts.append("<br>".join(parts))
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=df_valid["P/E"], y=df_valid["EPS Growth 3Y"], mode="markers", marker=dict(size=sizes, color=colors, line=dict(width=0.5, color="#333"), opacity=0.85), text=hover_parts, hoverinfo="text", name="Universe"))
-    fig.add_shape(type="line", x0=MEDIAN_PE, x1=MEDIAN_PE, y0=df_valid["EPS Growth 3Y"].min(), y1=df_valid["EPS Growth 3Y"].max(), line=dict(color="#1f77b4", width=1.5, dash="dash"))
-    fig.add_shape(type="line", x0=df_valid["P/E"].min(), x1=df_valid["P/E"].max(), y0=MEDIAN_EPS_3Y, y1=MEDIAN_EPS_3Y, line=dict(color="#1f77b4", width=1.5, dash="dash"))
-    fig.add_annotation(xref="paper", yref="paper", x=0.25, y=0.95, showarrow=False, text="<b>Q1 GROWTH + VALUE</b><br>High EPS Growth \u2022 Low P/E", font=dict(size=10, color="#1a1a1a"), bgcolor="rgba(255,255,255,0.7)", borderpad=4, align="center")
-    fig.add_annotation(xref="paper", yref="paper", x=0.75, y=0.95, showarrow=False, text="<b>Q2 GROWTH + PREMIUM</b><br>High EPS Growth \u2022 High P/E", font=dict(size=10, color="#1a1a1a"), bgcolor="rgba(255,255,255,0.7)", borderpad=4, align="center")
-    fig.add_annotation(xref="paper", yref="paper", x=0.25, y=0.05, showarrow=False, text="<b>Q3 VALUE / LOW GROWTH</b><br>Low EPS Growth \u2022 Low P/E", font=dict(size=10, color="#1a1a1a"), bgcolor="rgba(255,255,255,0.7)", borderpad=4, align="center")
-    fig.add_annotation(xref="paper", yref="paper", x=0.75, y=0.05, showarrow=False, text="<b>Q4 EXPENSIVE / LOW GROWTH</b><br>Low EPS Growth \u2022 High P/E", font=dict(size=10, color="#1a1a1a"), bgcolor="rgba(255,255,255,0.7)", borderpad=4, align="center")
-    if selected_row is not None and pd.notna(selected_row.get("P/E")) and pd.notna(selected_row.get("EPS Growth 3Y")):
-        sx = float(selected_row["P/E"])
-        sy = float(selected_row["EPS Growth 3Y"])
-        xmin = float(df_valid["P/E"].min())
-        ymin = float(df_valid["EPS Growth 3Y"].min())
-        fig.add_shape(type="line", x0=xmin, x1=sx, y0=sy, y1=sy, line=dict(color="black", width=1, dash="dot"))
-        fig.add_shape(type="line", x0=sx, x1=sx, y0=ymin, y1=sy, line=dict(color="black", width=1, dash="dot"))
-        fig.add_trace(go.Scatter(x=[sx], y=[sy], mode="markers", marker=dict(size=max(14, float(sizes.loc[selected_row.name]) if selected_row.name in sizes.index else 14) + 8, color=colors[df_valid.index.get_loc(selected_row.name)] if selected_row.name in df_valid.index else "#FFD54F", line=dict(color="black", width=3)), hoverinfo="skip", showlegend=False))
-
-    fig.update_layout(title="Valuation vs Earnings Growth — Centered Quadrant Map", xaxis=dict(title="P/E (valuation)", type="log" if log_toggle else "linear", gridcolor="rgba(0,0,0,0.08)"), yaxis=dict(title="EPS Growth 3Y (%)", gridcolor="rgba(0,0,0,0.08)", zeroline=True, zerolinecolor="rgba(0,0,0,0.15)"), height=620, margin=dict(l=60, r=20, t=60, b=60), plot_bgcolor="#FAFAFA", paper_bgcolor="white", legend=dict(orientation="h", y=-0.12))
-    st.plotly_chart(fig, width="stretch")
     st.caption(f"Median P/E **{MEDIAN_PE:.1f}x** · Median EPS Growth 3Y **{MEDIAN_EPS_3Y:+.1f}%** · {len(df_valid)} / {len(df)} companies plotted (P/E > 0)")
+
+    preset_quads = st.session_state.get("micro_preset_quadrant")
+    if preset_quads and isinstance(preset_quads, list):
+        default_quads = preset_quads
+    else:
+        default_quads = []
+
+    quad_options = ["Growth + Value", "Growth + Premium", "Value / Low Growth", "Expensive / Low Growth"]
+    sel_quads = st.multiselect("Filter by Quadrant (from Macro)", options=quad_options, default=default_quads, placeholder="All quadrants — choose to filter table")
+
+    view_df = df_valid.copy()
+    if sel_quads:
+        view_df = view_df[view_df["Quadrant"].isin(sel_quads)]
+    if selected_row is not None:
+        view_df = pd.concat([view_df[view_df["_label"] == selected_row["_label"]], view_df[view_df["_label"] != selected_row["_label"]]])
+
+    table_cols = [c for c in ["Company", "NSE Symbol", "Sector", "Quadrant", "Archetype", "Market Cap (Cr)", "P/E", "P/B", "EPS Growth 3Y", "Revenue Growth", "ROCE", "ROE", "1Y Return"] if c in view_df.columns]
+    if not view_df.empty:
+        st.dataframe(
+            view_df[table_cols].sort_values(["Quadrant", "P/E"] if "Quadrant" in view_df.columns else ["P/E"]),
+            hide_index=True,
+            width="stretch",
+            height=420,
+            column_config={
+                "Market Cap (Cr)": st.column_config.NumberColumn(format="%.0f"),
+                "P/E": st.column_config.NumberColumn(format="%.1fx"),
+                "P/B": st.column_config.NumberColumn(format="%.1fx"),
+                "EPS Growth 3Y": st.column_config.NumberColumn(format="%+.1f%%"),
+                "Revenue Growth": st.column_config.NumberColumn(format="%+.1f%%"),
+                "ROCE": st.column_config.NumberColumn(format="%.1f%%"),
+                "ROE": st.column_config.NumberColumn(format="%.1f%%"),
+                "1Y Return": st.column_config.NumberColumn(format="%+.1f%%"),
+            },
+        )
+        st.caption(f"Showing **{len(view_df)}** of {len(df_valid)} plotted companies. Click a row to select (or use search above) — table is sorted by Quadrant then P/E.")
+    else:
+        st.info("No companies match the selected quadrant filter.")
+
+    with st.expander("Show quadrant scatter (beta — may look distorted)", expanded=False):
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df_valid["P/E"], y=df_valid["EPS Growth 3Y"], mode="markers", marker=dict(size=sizes, color=colors, line=dict(width=0.5, color="#333"), opacity=0.85), text=hover_parts, hoverinfo="text", name="Universe"))
+        fig.add_shape(type="line", x0=MEDIAN_PE, x1=MEDIAN_PE, y0=df_valid["EPS Growth 3Y"].min(), y1=df_valid["EPS Growth 3Y"].max(), line=dict(color="#1f77b4", width=1.5, dash="dash"))
+        fig.add_shape(type="line", x0=df_valid["P/E"].min(), x1=df_valid["P/E"].max(), y0=MEDIAN_EPS_3Y, y1=MEDIAN_EPS_3Y, line=dict(color="#1f77b4", width=1.5, dash="dash"))
+        fig.add_annotation(xref="paper", yref="paper", x=0.25, y=0.95, showarrow=False, text="<b>Q1 GROWTH + VALUE</b><br>High EPS Growth \u2022 Low P/E", font=dict(size=10, color="#1a1a1a"), bgcolor="rgba(255,255,255,0.7)", borderpad=4, align="center")
+        fig.add_annotation(xref="paper", yref="paper", x=0.75, y=0.95, showarrow=False, text="<b>Q2 GROWTH + PREMIUM</b><br>High EPS Growth \u2022 High P/E", font=dict(size=10, color="#1a1a1a"), bgcolor="rgba(255,255,255,0.7)", borderpad=4, align="center")
+        fig.add_annotation(xref="paper", yref="paper", x=0.25, y=0.05, showarrow=False, text="<b>Q3 VALUE / LOW GROWTH</b><br>Low EPS Growth \u2022 Low P/E", font=dict(size=10, color="#1a1a1a"), bgcolor="rgba(255,255,255,0.7)", borderpad=4, align="center")
+        fig.add_annotation(xref="paper", yref="paper", x=0.75, y=0.05, showarrow=False, text="<b>Q4 EXPENSIVE / LOW GROWTH</b><br>Low EPS Growth \u2022 High P/E", font=dict(size=10, color="#1a1a1a"), bgcolor="rgba(255,255,255,0.7)", borderpad=4, align="center")
+        if selected_row is not None and pd.notna(selected_row.get("P/E")) and pd.notna(selected_row.get("EPS Growth 3Y")):
+            sx = float(selected_row["P/E"])
+            sy = float(selected_row["EPS Growth 3Y"])
+            xmin = float(df_valid["P/E"].min())
+            ymin = float(df_valid["EPS Growth 3Y"].min())
+            fig.add_shape(type="line", x0=xmin, x1=sx, y0=sy, y1=sy, line=dict(color="black", width=1, dash="dot"))
+            fig.add_shape(type="line", x0=sx, x1=sx, y0=ymin, y1=sy, line=dict(color="black", width=1, dash="dot"))
+            fig.add_trace(go.Scatter(x=[sx], y=[sy], mode="markers", marker=dict(size=max(14, float(sizes.loc[selected_row.name]) if selected_row.name in sizes.index else 14) + 8, color=colors[df_valid.index.get_loc(selected_row.name)] if selected_row.name in df_valid.index else "#FFD54F", line=dict(color="black", width=3)), hoverinfo="skip", showlegend=False))
+        fig.update_layout(title="Valuation vs Earnings Growth — Centered Quadrant Map", xaxis=dict(title="P/E (valuation)", type="log" if log_toggle else "linear", gridcolor="rgba(0,0,0,0.08)"), yaxis=dict(title="EPS Growth 3Y (%)", gridcolor="rgba(0,0,0,0.08)", zeroline=True, zerolinecolor="rgba(0,0,0,0.15)"), height=520, margin=dict(l=60, r=20, t=60, b=60), plot_bgcolor="#FAFAFA", paper_bgcolor="white", legend=dict(orientation="h", y=-0.12))
+        st.plotly_chart(fig, width="stretch")
 
     if selected_row is None:
         st.info("Select a stock above to see the 5-second decision cockpit.")
