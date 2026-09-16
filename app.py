@@ -46,8 +46,7 @@ c1, c2, c3, c4 = st.columns(4)
 with c1:
     st.markdown("#### Macro Analysis")
     st.markdown(
-        "The Market Scorecard: does growth justify valuations at your required return? "
-        "Valuation & growth heroes, quadrant tiles, second-order context."
+        "Is Smallcap 250 investable? Valuations **vs 5Y history and vs Nifty 50**, growth and liquidity — clear takeaways."
     )
     st.page_link("pages/1_Macro_Analysis.py", label="Open Macro", icon=None)
 with c2:
@@ -67,8 +66,7 @@ with c3:
 with c4:
     st.markdown("#### Guide")
     st.markdown(
-        "What every number means: P/E, earnings yield, required return, "
-        "margin of safety, quadrants - in plain language."
+        "What every number means: P/E, P/B, PEG, vs history vs Nifty 50, quadrants — in plain language."
     )
     st.page_link("pages/4_Guide.py", label="Open Guide", icon=None)
 

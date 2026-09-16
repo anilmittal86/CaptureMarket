@@ -1,8 +1,8 @@
 """Macro Analysis - Market Scorecard.
 
 Single screen, no tabs:
-  1. Market Verdict banner: does growth justify valuations at the required return?
-  2. Two hero panels (Valuation via earnings-yield lens, Growth via breadth).
+  1. Market Verdict banner: valuations vs history and vs Nifty 50, growth intact?
+  2. Snapshot: Index P/E/PB vs history/peer + growth.
   3. Quadrant synthesis tiles that deep-link into the Micro map.
   4. Second-order context strip (muted).
   5. Detail tables collapsed behind expanders.
@@ -56,73 +56,64 @@ else:
     )
 
 # ===========================================================================
-# Zone 1b: REALITY CHECK - the universe as one index, two hard gates
+# Zone 1b: SNAPSHOT — valuations vs history + vs Nifty 50
 # ===========================================================================
 if vd.get("available"):
-    st.markdown('<div class="hero-title">Market Snapshot - the universe as one index</div>', unsafe_allow_html=True)
+    hist = vd.get("hist_ctx", {})
+    st.markdown('<div class="hero-title">Market Snapshot — Smallcap 250 as one index</div>', unsafe_allow_html=True)
     s1, s2, s3, s4 = st.columns(4)
     with s1:
-        stat_card("Index P/E", f"{vd['idx_pe']:.1f}x", f"cap-weighted · {vd['priced_n']} priced cos")
+        prem5 = hist.get("premium_5y", float("nan")) if isinstance(hist, dict) else float("nan")
+        med5 = hist.get("median_5y", float("nan")) if isinstance(hist, dict) else float("nan")
+        pct5 = hist.get("pct_5y")
+        sub = f"{prem5:+.0f}% vs 5Y median {med5:.1f}x · {pct5:.0f}th %ile" if hist.get("available") and pct5 is not None else "history collecting"
+        tone = "warn" if hist.get("available") and (prem5 > 20 or (pct5 is not None and pct5 > 80)) else ("pos" if hist.get("available") and prem5 < 0 else "neutral")
+        stat_card("Index P/E vs History", f"{vd['idx_pe']:.1f}x", sub, tone)
     with s2:
-        stat_card(
-            "Earnings Yield",
-            f"{vd['ey']:.1f}%",
-            f"G-Sec pays {vd['risk_free']:.1f}% risk-free",
-            "pos" if vd['buffer_pass'] else "warn",
-        )
+        pb_txt = f"{vd.get('pb_med', float('nan')):.1f}x" if vd.get("pb_med") == vd.get("pb_med") else "—"
+        hist_pb = hist.get("premium_5y", 0) if isinstance(hist, dict) else 0
+        stat_card("P/B vs History", pb_txt, f"{hist_pb:+.0f}% vs 5Y P/B median" if hist.get("available") else "history collecting", "neutral")
     with s3:
-        stat_card("Nominal Growth", f"{vd['nominal_growth']:+.1f}%", "median EPS 3-yr CAGR")
+        peer_pe = vd.get("peer_pe", float("nan"))
+        peer_prem = vd.get("peer_premium", float("nan"))
+        sub_peer = f"{peer_prem:+.0f}% premium — Nifty 50 {peer_pe:.1f}x" if peer_pe == peer_pe else "peer collecting"
+        tone_peer = "warn" if peer_prem == peer_prem and peer_prem > 25 else ("pos" if peer_prem == peer_prem and peer_prem < 0 else "neutral")
+        stat_card("Smallcap vs Nifty 50", f"{peer_prem:+.0f}%", sub_peer, tone_peer)
     with s4:
-        stat_card(
-            "Real Growth",
-            f"{vd['structural_growth']:+.1f}%",
-            f"after ~{vd['inflation']:.0f}% inflation",
-            "pos" if vd['structural_growth'] > 0 else "neg",
-        )
+        sg = vd.get("structural_growth", float("nan"))
+        stat_card("Real Growth", f"{sg:+.1f}%", f"nominal {vd.get('nominal_growth', 0):+.1f}% − {vd.get('inflation', 5):.0f}% infl", "pos" if sg == sg and sg > 0 else "warn")
 
-    st.markdown('<div class="section-title">The Reality Check - two hard gates at your required return</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Valuation check — vs own history and vs broad market</div>', unsafe_allow_html=True)
+    peer_pe = vd.get("peer_pe", float("nan"))
+    hist_available = hist.get("available", False) if isinstance(hist, dict) else False
     evaluation_table(
         [
             {
-                "title": "1. The Growth Hurdle",
-                "subtitle": "Growth needed forever to justify today's price.",
-                "math": f"~{vd['implied_growth'] * 100:.1f}% / yr",
-                "target": (
-                    f"Real growth must beat it. "
-                    f"({vd['required_return']:.0f}% required − {vd['ey']:.1f}% yield)."
-                ),
-                "passed": vd["growth_pass"],
+                "title": "1. Valuation vs History (5Y)",
+                "subtitle": f"Index P/E {vd['idx_pe']:.1f}x vs 5Y median {hist.get('median_5y', 0):.1f}x" if hist_available else "Index P/E vs own 5Y history",
+                "math": f"{hist.get('premium_5y', 0):+.0f}% premium<br><span style='font-size:0.8em;font-weight:normal;color:#64748B;'>({hist.get('pct_5y', 0):.0f}th %ile)</span>" if hist_available else "collecting",
+                "target": "Must be < +20% and < 80th %ile to be reasonable",
+                "passed": vd.get("val_hist_pass", True),
             },
             {
-                "title": "2. Structural Growth (real)",
-                "subtitle": f"Median EPS 3-yr CAGR deflated by ~{vd['inflation']:.0f}% inflation.",
-                "math": (
-                    f"{vd['structural_growth']:+.1f}% / yr real"
-                    f"<br><span style='font-size:0.8em;font-weight:normal;color:#64748B;'>"
-                    f"({vd['nominal_growth']:+.1f}% nominal)</span>"
-                ),
-                "target": "Must comfortably clear the hurdle.",
-                "passed": vd["growth_pass"],
+                "title": "2. Valuation vs Nifty 50",
+                "subtitle": "Smallcap premium over largecap",
+                "math": f"{vd.get('peer_premium', 0):+.0f}% premium<br><span style='font-size:0.8em;font-weight:normal;color:#64748B;'>({vd['idx_pe']:.1f}x vs {peer_pe:.1f}x)</span>" if peer_pe == peer_pe else "collecting",
+                "target": "Must be < +25% premium to be reasonable",
+                "passed": vd.get("peer_pass", True),
             },
             {
-                "title": "3. Safety Buffer",
-                "subtitle": "Index earnings yield vs the risk-free bank rate.",
-                "math": (
-                    f"{vd['safety_buffer'] * 100:+.1f}%"
-                    f"<br><span style='font-size:0.8em;font-weight:normal;color:#64748B;'>"
-                    f"({vd['ey']:.1f}% vs {vd['risk_free']:.1f}%)</span>"
-                ),
-                "target": "Must be positive - equity yield above the G-Sec.",
-                "passed": vd["buffer_pass"],
+                "title": "3. Growth (real)",
+                "subtitle": f"Median EPS 3-yr CAGR deflated by ~{vd.get('inflation', 5):.0f}% inflation",
+                "math": f"{vd.get('structural_growth', 0):+.1f}% / yr real<br><span style='font-size:0.8em;font-weight:normal;color:#64748B;'>({vd.get('nominal_growth', 0):+.1f}% nominal)</span>",
+                "target": "Must be > 0% real and breadth improving vs history",
+                "passed": vd.get("growth_pass", True),
             },
         ]
     )
-    st.caption(f"{vd['loss_making']} loss-making / unpriced companies are excluded from index earnings.")
+    st.caption(f"{vd['loss_making']} loss-making / unpriced companies excluded from cap-weighted P/E. History: NSE P/E/PB daily 5Y (synthetic seed, will be replaced by live NSE fetch).")
 else:
-    insight_banner(
-        "Reality Check unavailable: too few companies have a positive P/E in this snapshot.",
-        "warn",
-    )
+    insight_banner("Snapshot unavailable: too few companies have a positive P/E in this snapshot.", "warn")
 
 # ===========================================================================
 # Zone 2: WHERE VALUE MEETS GROWTH - quadrant synthesis, click to explore

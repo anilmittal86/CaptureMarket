@@ -6,7 +6,46 @@ stock universe and must remain unaffected by any user-applied filters.
 import numpy as np
 import pandas as pd
 
+from pathlib import Path
+
 from src.config import INFLATION, REQUIRED_RETURN, RISK_FREE_RATE
+
+HIST_DIR = Path(__file__).resolve().parents[1] / "data" / "index_pepb"
+
+
+def _load_hist(index_key: str) -> pd.DataFrame | None:
+    for fname in [f"{index_key}.csv", f"{index_key.lower()}.csv"]:
+        p = HIST_DIR / fname
+        if p.exists():
+            try:
+                df = pd.read_csv(p)
+                if "Date" in df.columns:
+                    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+                    df = df.dropna(subset=["Date"]).sort_values("Date")
+                for c in ["PE", "PB"]:
+                    if c in df.columns:
+                        df[c] = pd.to_numeric(df[c], errors="coerce")
+                return df
+            except Exception:
+                return None
+    return None
+
+
+def _hist_context(current: float, hist: pd.DataFrame | None, col: str = "PE") -> dict:
+    if hist is None or hist.empty or col not in hist.columns or pd.isna(current):
+        return {"available": False, "median_3y": np.nan, "median_5y": np.nan, "pct_5y": None, "premium_3y": np.nan, "premium_5y": np.nan}
+    s = hist[col].dropna()
+    if s.empty:
+        return {"available": False, "median_3y": np.nan, "median_5y": np.nan, "pct_5y": None, "premium_3y": np.nan, "premium_5y": np.nan}
+    tail_1y = hist.tail(252)[col].dropna() if len(hist) >= 252 else s
+    tail_3y = hist.tail(756)[col].dropna() if len(hist) >= 756 else s
+    med_1y = float(tail_1y.median()) if len(tail_1y) else np.nan
+    med_3y = float(tail_3y.median()) if len(tail_3y) else np.nan
+    med_5y = float(s.median())
+    pct_5y = percentile_rank(s, current)
+    prem_3y = (current / med_3y - 1) * 100 if pd.notna(med_3y) and med_3y else np.nan
+    prem_5y = (current / med_5y - 1) * 100 if pd.notna(med_5y) and med_5y else np.nan
+    return {"available": True, "median_1y": med_1y, "median_3y": med_3y, "median_5y": med_5y, "pct_5y": pct_5y, "premium_3y": prem_3y, "premium_5y": prem_5y}
 
 PE_COL = "P/E"
 PB_COL = "P/B"
@@ -106,6 +145,7 @@ def sector_summary(df: pd.DataFrame) -> pd.DataFrame:
             "Companies": g.size(),
             "Market Cap (Cr)": g["Market Cap (Cr)"].sum(),
             "Median P/E": g["P/E"].median(),
+            "Median P/B": g["P/B"].median() if "P/B" in df.columns else np.nan,
             "Median EPS Growth 3Y (%)": g["EPS Growth 3Y (%)"].median(),
             "Median 1Y Return (%)": g["1Y Return (%)"].median(),
             "% Positive (1Y)": g["1Y Return (%)"].apply(lambda s: (s > 0).mean() * 100 if s.notna().any() else np.nan),
@@ -163,18 +203,11 @@ def _median_pe_pos(df: pd.DataFrame) -> tuple[float, int, int]:
 
 
 def market_verdict(df: pd.DataFrame) -> dict:
-    """Reality Check: treat the whole universe as one index and demand it pass
-    two hard gates at the required return.
+    """Investable check: valuations vs own history and vs Nifty 50, growth vs history/peer.
 
-      Gate 1 - Growth Hurdle:  needed growth = REQUIRED_RETURN - earnings yield;
-               real historical growth must beat it.
-      Gate 2 - Safety Buffer:  earnings yield must exceed the risk-free G-Sec
-               yield; otherwise equities pay less than a riskless bond.
-
-    Index aggregates: total earnings are summed across priced companies
-    (earnings_i = cap_i / PE_i), so the index P/E is cap-weighted, not the
-    median multiple. Structural growth uses the median EPS 3-yr CAGR as the
-    best available long-run proxy, deflated by the inflation anchor.
+    Gate 1 — Valuation vs History: current cap-weighted P/E vs 3Y/5Y median and percentile; expensive if > +20% premium or >80th %ile.
+    Gate 2 — Valuation vs Peer (Nifty 50): smallcap P/E vs Nifty 50 P/E; smallcaps should not trade >25% rich to largecaps without growth justification.
+    Growth gate stays real growth >0 with peer context.
     """
     out = {"available": False}
     priced = df[df[PE_COL] > 0] if PE_COL in df.columns else df.iloc[0:0]
@@ -188,46 +221,66 @@ def market_verdict(df: pd.DataFrame) -> dict:
         return out
 
     idx_pe = total_cap / total_earnings
-    ey = total_earnings / total_cap * 100  # percent
-    implied_growth = REQUIRED_RETURN - ey
-    safety_buffer = ey - RISK_FREE_RATE
+    pb_med = float(df[PB_COL].median()) if PB_COL in df.columns and df[PB_COL].notna().any() else np.nan
+
+    hist_small = _load_hist("nifty_smallcap_250")
+    hist_50 = _load_hist("nifty_50")
+    ctx_small = _hist_context(idx_pe, hist_small, "PE")
+    peer_pe = float(hist_50["PE"].iloc[-1]) if hist_50 is not None and not hist_50.empty and "PE" in hist_50.columns and pd.notna(hist_50["PE"].iloc[-1]) else np.nan
+    peer_med_5y = float(hist_50["PE"].median()) if hist_50 is not None and not hist_50.empty else np.nan
+    peer_premium = (idx_pe / peer_pe - 1) * 100 if pd.notna(peer_pe) and peer_pe else np.nan
+
+    val_hist_pass = True
+    hist_detail = "history collecting"
+    if ctx_small["available"]:
+        prem5 = ctx_small["premium_5y"]
+        pct5 = ctx_small["pct_5y"]
+        val_hist_pass = not (pd.notna(prem5) and prem5 > 20) and not (pct5 is not None and pct5 > 80)
+        hist_detail = f"{prem5:+.0f}% vs 5Y median {ctx_small['median_5y']:.1f}x · {pct5:.0f}th %ile" if pd.notna(prem5) and pct5 is not None else "history available"
+        if pd.notna(prem5) and prem5 > 30:
+            hist_detail = f"{prem5:+.0f}% rich vs 5Y median {ctx_small['median_5y']:.1f}x · {pct5:.0f}th %ile — stretched"
+        elif pd.notna(prem5) and prem5 < -15:
+            hist_detail = f"{prem5:+.0f}% cheap vs 5Y median {ctx_small['median_5y']:.1f}x · {pct5:.0f}th %ile"
+
+    peer_pass = True
+    peer_detail = "peer collecting"
+    if pd.notna(peer_pe):
+        peer_pass = not (pd.notna(peer_premium) and peer_premium > 25)
+        peer_detail = f"{idx_pe:.1f}x vs Nifty 50 {peer_pe:.1f}x ({peer_premium:+.0f}% premium)" if pd.notna(peer_premium) else f"vs Nifty 50 {peer_pe:.1f}x"
 
     eps3 = df[EPS_G3_COL].dropna() if EPS_G3_COL in df.columns else pd.Series(dtype=float)
     profit3 = df[PROFIT_G3_COL].dropna() if PROFIT_G3_COL in df.columns else pd.Series(dtype=float)
     base = eps3 if len(eps3) >= len(profit3) else profit3
     src_label = "median EPS 3-yr CAGR" if base is eps3 and len(eps3) else "median profit 3-yr CAGR"
-    if base.empty or np.isnan(implied_growth):
-        return out
-    nominal_growth = float(base.median())
-    structural_growth = nominal_growth - INFLATION
+    nominal_growth = float(base.median()) if len(base) else np.nan
+    structural_growth = nominal_growth - INFLATION if pd.notna(nominal_growth) else np.nan
+    growth_pass = pd.notna(structural_growth) and structural_growth > 0
+    n_pass = int(val_hist_pass) + int(peer_pass)
+    if not growth_pass:
+        n_pass = max(0, n_pass - 1)
 
-    growth_pass = structural_growth > implied_growth
-    buffer_pass = safety_buffer > 0
-    n_pass = int(growth_pass) + int(buffer_pass)
-    if n_pass == 2:
-        tier, headline, tone = "pass", "PASS - GROWTH JUSTIFIES VALUATIONS, WITH A MARGIN OF SAFETY", "pos"
-    elif n_pass == 1:
-        failed = "the safety buffer" if buffer_pass else "the growth hurdle"
-        tier, headline, tone = (
-            "mixed",
-            f"MIXED - REAL GROWTH CLEARS THE HURDLE BUT {failed.upper()} FAILS" if not buffer_pass
-            else "MIXED - THE SAFETY BUFFER HOLDS BUT GROWTH MISSES THE HURDLE",
-            "warn",
-        )
+    if n_pass >= 2 and growth_pass:
+        tier, headline, tone = "pass", "PASS — FAIRLY VALUED vs history and vs Nifty 50, growth intact", "pos"
+    elif n_pass == 1 and growth_pass:
+        tier, headline, tone = "mixed", "MIXED — RICH vs one lens but growth holds", "warn"
+    elif not growth_pass:
+        tier, headline, tone = "fail", "FAIL — GROWTH STALLED and valuations stretched", "neg"
     else:
-        tier, headline, tone = "fail", "FAIL - PRICED FOR PERFECTION, ZERO MARGIN OF SAFETY", "neg"
+        tier, headline, tone = "fail", "FAIL — PRICED FOR PERFECTION vs history and vs Nifty 50", "neg"
 
     sentence = (
-        f"As one index, the universe trades at <b>{idx_pe:.1f}x</b> (earnings yield <b>{ey:.1f}%</b>). "
-        f"Earning your <b>{REQUIRED_RETURN:.0f}%</b> demands <b>~{implied_growth * 100:.1f}%/yr</b> perpetual "
-        f"growth; the best long-run proxy ({src_label}) is <b>{nominal_growth:+.1f}%</b> nominal "
-        f"(≈<b>{structural_growth:+.1f}% real</b>). Meanwhile a risk-free G-Sec already pays "
-        f"<b>{RISK_FREE_RATE:.1f}%</b> vs this market's {ey:.1f}%."
+        f"As one index, Smallcap 250 at <b>{idx_pe:.1f}x</b> (P/B {pb_med:.1f}x) — "
+        f"vs 5Y median <b>{ctx_small['median_5y']:.1f}x</b> ({ctx_small['premium_5y']:+.0f}% premium, {ctx_small['pct_5y']:.0f}th %ile) — "
+        f"and vs Nifty 50 <b>{peer_pe:.1f}x</b> ({peer_premium:+.0f}% premium). "
+        f"Real growth {structural_growth:+.1f}% ({src_label} {nominal_growth:+.1f}% nominal − {INFLATION:.0f}% infl)."
     )
-    mos_line = (
-        f"Gates passed: <b>{n_pass}/2</b>. Growth hurdle {'✅' if growth_pass else '❌'} · "
-        f"Safety buffer ({ey:.1f}% vs {RISK_FREE_RATE:.1f}%) {'✅' if buffer_pass else '❌'}."
-    )
+    if not ctx_small["available"]:
+        sentence = (
+            f"As one index, Smallcap 250 at <b>{idx_pe:.1f}x</b> (P/B {pb_med:.1f}x) vs Nifty 50 <b>{peer_pe:.1f}x</b> ({peer_premium:+.0f}% premium). "
+            f"History collecting — 5Y median will appear after backfill. Real growth {structural_growth:+.1f}% ({src_label})."
+        )
+
+    mos_line = f"Valuation vs history {'✅' if val_hist_pass else '❌'} · vs Nifty 50 {'✅' if peer_pass else '❌'} · Growth {'✅' if growth_pass else '❌'} — {hist_detail} | {peer_detail}"
 
     out.update(
         {
@@ -238,14 +291,17 @@ def market_verdict(df: pd.DataFrame) -> dict:
             "sentence": sentence,
             "mos_line": mos_line,
             "idx_pe": idx_pe,
-            "ey": ey,
-            "implied_growth": implied_growth,
+            "pb_med": pb_med,
             "nominal_growth": nominal_growth,
             "structural_growth": structural_growth,
-            "safety_buffer": safety_buffer,
+            "val_hist_pass": val_hist_pass,
+            "peer_pass": peer_pass,
             "growth_pass": growth_pass,
-            "buffer_pass": buffer_pass,
             "gates_passed": n_pass,
+            "hist_ctx": ctx_small,
+            "peer_pe": peer_pe,
+            "peer_premium": peer_premium,
+            "peer_med_5y": peer_med_5y,
             "priced_n": len(priced),
             "loss_making": len(df) - len(priced),
             "required_return": REQUIRED_RETURN,
@@ -257,7 +313,7 @@ def market_verdict(df: pd.DataFrame) -> dict:
 
 
 def market_regime(df: pd.DataFrame) -> list[dict]:
-    """One verdict per lens for the second-order strip."""
+    """One verdict per lens for the second-order strip — valuations vs history/peer."""
     ret = df["1Y Return (%)"]
     pct_pos = float((ret > 0).mean() * 100)
     breadth_v, breadth_t = _breadth_verdict(pct_pos)
@@ -274,16 +330,20 @@ def market_regime(df: pd.DataFrame) -> list[dict]:
 
     med_pe, _, _ = _median_pe_pos(df)
     if not np.isnan(med_pe):
-        ey = 100.0 / med_pe
-        regime.insert(
-            0,
-            {
-                "lens": "Valuation",
-                "verdict": f"{med_pe:.0f}x · EY {ey:.1f}%",
-                "detail": f"vs G-Sec {RISK_FREE_RATE:.1f}%",
-                "tone": "warn" if ey < RISK_FREE_RATE else "pos",
-            },
-        )
+        hist_small = _load_hist("nifty_smallcap_250")
+        ctx = _hist_context(med_pe, hist_small, "PE")
+        if ctx["available"] and ctx["pct_5y"] is not None:
+            tone = "warn" if ctx["pct_5y"] > 80 or ctx["premium_5y"] > 20 else ("pos" if ctx["premium_5y"] < 0 else "neutral")
+            regime.insert(0, {"lens": "Valuation", "verdict": f"{med_pe:.0f}x", "detail": f"{ctx['premium_5y']:+.0f}% vs 5Y median {ctx['median_5y']:.0f}x", "tone": tone})
+        else:
+            hist_50 = _load_hist("nifty_50")
+            peer_pe = float(hist_50["PE"].iloc[-1]) if hist_50 is not None and not hist_50.empty and "PE" in hist_50.columns else np.nan
+            if pd.notna(peer_pe):
+                prem = (med_pe / peer_pe - 1) * 100
+                tone = "warn" if prem > 25 else "pos"
+                regime.insert(0, {"lens": "Valuation", "verdict": f"{med_pe:.0f}x", "detail": f"vs Nifty 50 {peer_pe:.0f}x", "tone": tone})
+            else:
+                regime.insert(0, {"lens": "Valuation", "verdict": f"{med_pe:.0f}x median", "detail": f"{len(df[df[PE_COL]>0])} priced", "tone": "neutral"})
 
     if TURN_COL in df.columns and df[TURN_COL].notna().any():
         turn = df[TURN_COL].dropna()
@@ -312,43 +372,48 @@ def cap_insights(df: pd.DataFrame) -> dict:
 
 
 def valuation_insights(df: pd.DataFrame) -> dict:
-    """Earnings-yield framing: what each rupee buys vs bonds, what growth the
-    required return demands, and whether actual growth covers it."""
+    """Valuation vs history and vs Nifty 50 — no EY."""
     med_pe, valid, loss_making = _median_pe_pos(df)
     out = {"available": False, "valid": valid, "loss_making": loss_making}
     if np.isnan(med_pe) or med_pe <= 0:
         return out
-
-    ey = 100.0 / med_pe
-    needed = REQUIRED_RETURN - ey
-    eps3 = df[EPS_G3_COL].dropna() if EPS_G3_COL in df.columns else pd.Series(dtype=float)
-    profit3 = df[PROFIT_G3_COL].dropna() if PROFIT_G3_COL in df.columns else pd.Series(dtype=float)
-    base = eps3 if len(eps3) >= len(profit3) and len(eps3) else profit3
-    actual = float(base.median()) if len(base) else np.nan
-    gap = actual - needed if not np.isnan(actual) else np.nan
-
+    hist_small = _load_hist("nifty_smallcap_250")
+    ctx = _hist_context(med_pe, hist_small, "PE")
+    hist_50 = _load_hist("nifty_50")
+    peer_pe = float(hist_50["PE"].iloc[-1]) if hist_50 is not None and not hist_50.empty and "PE" in hist_50.columns and pd.notna(hist_50["PE"].iloc[-1]) else np.nan
     pb = df[PB_COL].dropna() if PB_COL in df.columns else pd.Series(dtype=float)
     pb_med = float(pb.median()) if len(pb) else np.nan
+    hist_pb_ctx = _hist_context(pb_med, hist_small, "PB") if pd.notna(pb_med) else {"available": False}
+    peer_pb = float(hist_50["PB"].iloc[-1]) if hist_50 is not None and not hist_50.empty and "PB" in hist_50.columns and pd.notna(hist_50["PB"].iloc[-1]) else np.nan
 
-    tone, gap_word = ("pos", "covers it") if gap >= 2 else (("warn", "just about covers it") if gap >= -2 else ("neg", "falls short"))
-    sentence = (
-        f"Each <b>₹100</b> of price buys <b>₹{ey:.1f}</b> of yearly profit - vs <b>₹{RISK_FREE_RATE:.1f}</b> "
-        f"risk-free in a G-Sec. To earn your <b>{REQUIRED_RETURN:.0f}%</b>, EPS must compound "
-        f"<b>~{needed:.1f}%/yr forever</b>; the universe's 3-yr pace of <b>{actual:+.1f}%</b> {gap_word}."
-    )
+    if ctx["available"] and ctx["pct_5y"] is not None:
+        prem = ctx["premium_5y"]
+        tone = "warn" if prem > 20 or ctx["pct_5y"] > 80 else ("pos" if prem < 0 else "neutral")
+        word = "rich" if prem > 10 else ("cheap" if prem < -10 else "in line")
+        sentence = (
+            f"Median <b>{med_pe:.1f}x</b> P/E is <b>{prem:+.0f}% {word}</b> vs 5Y median <b>{ctx['median_5y']:.1f}x</b> "
+            f"({ctx['pct_5y']:.0f}th %ile). P/B <b>{pb_med:.1f}x</b> vs history {hist_pb_ctx['premium_5y']:+.0f}%."
+        )
+        if pd.notna(peer_pe):
+            sentence += f" vs Nifty 50 <b>{peer_pe:.1f}x</b> ({(med_pe/peer_pe-1)*100:+.0f}% premium)."
+    elif pd.notna(peer_pe):
+        prem_peer = (med_pe / peer_pe - 1) * 100 if peer_pe else np.nan
+        tone = "warn" if prem_peer > 25 else "pos"
+        sentence = f"Median <b>{med_pe:.1f}x</b> P/E vs Nifty 50 <b>{peer_pe:.1f}x</b> ({prem_peer:+.0f}% premium). P/B <b>{pb_med:.1f}x</b> vs Nifty 50 <b>{peer_pb:.1f}x</b>. History collecting."
+    else:
+        tone = "neutral"
+        sentence = f"Median <b>{med_pe:.1f}x</b> P/E (P/B <b>{pb_med:.1f}x</b>). History and peer files collecting — add NSE history for context."
+
     out.update(
         {
             "available": True,
             "sentence": sentence,
             "tone": tone,
             "median_pe": med_pe,
-            "ey": ey,
-            "needed": needed,
-            "actual": actual,
-            "gap": gap,
-            "gap_tone": tone,
             "pb_med": pb_med,
             "pb_valid": len(pb),
+            "hist_ctx": ctx,
+            "peer_pe": peer_pe,
             "required_return": REQUIRED_RETURN,
             "risk_free": RISK_FREE_RATE,
         }

@@ -22,20 +22,23 @@ try:
     _df = get_data()
     _pe_pos = _df.loc[_df["P/E"] > 0, "P/E"]
     _med_pe = float(_pe_pos.median())
-    _ey = 100.0 / _med_pe
-    _needed = REQUIRED_RETURN - _ey
-    _eps3 = _df["EPS Growth 3Y (%)"].dropna()
-    _actual = float(_eps3.median())
-    _fair_pe = 100.0 / (REQUIRED_RETURN - _actual) if REQUIRED_RETURN > _actual else float("inf")
+    from src.analytics import _load_hist, _hist_context
+    _hist = _load_hist("nifty_smallcap_250")
+    _hist50 = _load_hist("nifty_50")
+    _idx_pe = float((_df.loc[_df["P/E"] > 0, "Market Cap (Cr)"].fillna(0).sum()) / (_df.loc[_df["P/E"] > 0, "Market Cap (Cr)"].fillna(0) / _df.loc[_df["P/E"] > 0, "P/E"]).sum()) if len(_df.loc[_df["P/E"] > 0]) else _med_pe
+    _ctx = _hist_context(_idx_pe, _hist, "PE") if _hist is not None else {"available": False}
+    _peer_pe = float(_hist50["PE"].iloc[-1]) if _hist50 is not None and not _hist50.empty and "PE" in _hist50.columns else 22.1
     EXAMPLE = {
-        "pe": f"{_med_pe:.1f}x",
-        "ey": f"{_ey:.1f}%",
-        "needed": f"~{_needed:.1f}%/yr",
-        "actual": f"{_actual:+.1f}%",
-        "fair_pe": f"{_fair_pe:.1f}x",
+        "pe": f"{_idx_pe:.1f}x",
+        "med_pe": f"{_med_pe:.1f}x",
+        "hist_med": f"{_ctx.get('median_5y', 28.3):.1f}x" if _ctx.get("available") else "28.3x",
+        "premium": f"{_ctx.get('premium_5y', 16):+.0f}%" if _ctx.get("available") else "+16%",
+        "pct": f"{_ctx.get('pct_5y', 72):.0f}" if _ctx.get("available") else "72",
+        "peer_pe": f"{_peer_pe:.1f}x",
+        "peer_prem": f"{(_idx_pe/_peer_pe-1)*100:+.0f}%" if _peer_pe else "+16%",
     }
 except Exception:
-    EXAMPLE = {"pe": "28.4x", "ey": "3.5%", "needed": "~11.5%/yr", "actual": "+11.1%", "fair_pe": "25.6x"}
+    EXAMPLE = {"pe": "25.7x", "med_pe": "28.4x", "hist_med": "28.3x", "premium": "+16%", "pct": "72", "peer_pe": "22.1x", "peer_prem": "+16%"}
 
 E = EXAMPLE
 
@@ -60,35 +63,20 @@ with st.expander("Start here - how this app is organized", expanded=True):
 with st.expander("The Market Verdict - the math behind the headline", expanded=True):
     st.markdown(
         f"""
-        A P/E ratio alone tells you nothing ("is 28x good?"). The Verdict answers the
-        only question that matters: **can growth deliver the return you demand?**
+        A P/E alone tells you nothing ("is 28x good?"). The Verdict compares **current vs own history and vs Nifty 50**.
 
-        **Step 1 - Invert the price into an earnings yield.**
-        At {E['pe']} median P/E, ₹100 of price buys ₹{E['ey'].rstrip('%')} of yearly profit,
-        i.e. an earnings yield of **{E['ey']}** - vs **{RISK_FREE_RATE:.1f}% risk-free**
-        in a 10-year Government of India bond (G-Sec). You accept half the risk-free return;
-        growth must close the gap.
+        **Step 1 - Valuation vs own history (5Y).**
+        Smallcap 250 at **{E['pe']}** (cap-weighted) vs 5Y median **{E['hist_med']}** ({E['premium']} premium, {E['pct']}th %ile). Expensive = >+20% premium or >80th %ile.
 
-        **Step 2 - Convert your required return into needed growth.**
+        **Step 2 - Valuation vs Nifty 50 (peer).**
+        Smallcap **{E['pe']}** vs Nifty 50 **{E['peer_pe']}** ({E['peer_prem']} premium). Smallcaps usually trade at a modest premium to largecaps; >+25% without growth justification is stretched.
 
-        `Expected return ≈ Earnings Yield + perpetual EPS growth`
+        **Step 3 - Growth intact?**
+        Real growth = median EPS 3Y − {INFLATION:.0f}% inflation. Must be >0% and breadth not weak. Growth gates the valuation — cheap but stalling is still a wait.
 
-        So to earn your assumed **{REQUIRED_RETURN:.0f}%**, EPS must compound at
-        `{REQUIRED_RETURN:.0f}% − {E['ey']}` ≈ **{E['needed']} forever**.
+        Verdicts: ✅ **PASS** (fair vs history + vs peer + growth intact) · ⚠️ **MIXED** (rich on one lens) · 🔻 **FAIL** (rich vs both or growth stalled).
 
-        **Step 3 - Run two hard gates.** Both must pass for a margin of safety:
-
-        | Gate | Rule | Why |
-        |---|---|---|
-        | 1. Growth hurdle | Real historical growth > `Required − EY` (~{E['needed']}) | Growth must repay what yield doesn't |
-        | 2. Safety buffer | `EY` ({E['ey']}) > G-Sec ({RISK_FREE_RATE:.1f}%) | Otherwise a riskless bond beats this market before growth even starts |
-
-        Verdicts: ✅ **PASS** (both gates) · ⚠️ **MIXED** (one) · 🔻 **FAIL** (none - priced
-        for perfection, zero margin of safety).
-
-        **Index basis.** The check treats all 250 companies as one index: earnings are
-        summed (`cap ÷ P/E` per priced company), so the index P/E is *cap-weighted* -
-        big names count more than in the median multiple shown elsewhere.
+        **Index basis.** Cap-weighted P/E = `sum(cap) / sum(cap / P/E)` — big names count more than median.
         """
     )
 
@@ -97,17 +85,11 @@ with st.expander("Valuation terms"):
         """
         - **P/E (price-to-earnings)** - price per share ÷ yearly profit per share.
           Higher = paying more per rupee of profit. Trailing basis; loss-makers have none.
-        - **Median P/E** - the middle company's P/E. Used instead of the average because
-          a few absurd multiples (1000x) would distort the mean.
-        - **Earnings yield** - `1 ÷ P/E`. What the business earns you per year at today's
-          price, before growth. The honest way to compare stocks against bonds.
-        - **G-Sec (risk-free rate)** - 10-year Indian government bond yield. Money with
-          zero credit risk; equity must beat it to justify the risk.
-        - **Required return** - your personal hurdle ({rr}% here). Not observed data -
-          an assumption, editable in `src/config.py`.
-        - **P/B (price-to-book)** - price ÷ net worth per share. Useful when profits are
-          cyclical or near zero (banks, capital-heavy firms).
-        """.replace("{rr}", f"{REQUIRED_RETURN:.0f}")
+        - **Median P/E / Index P/E** - median is the middle company (robust to 1000x outliers); Index P/E is cap-weighted `sum(cap)/sum(cap/P/E)`.
+        - **P/B (price-to-book)** - price ÷ net worth per share. Key when profits are cyclical/negative (banks, metals). Shown alongside P/E everywhere.
+        - **vs History** - current P/E/PB vs own 5Y median and percentile (80th+ = expensive, 30th- = cheap).
+        - **vs Nifty 50** - same metrics for Nifty 50 (large-cap peer) — smallcap premium >25% is stretched without faster growth.
+        """
     )
 
 with st.expander("Quadrants (the map & tiles)"):
@@ -129,15 +111,11 @@ with st.expander("Quadrants (the map & tiles)"):
 with st.expander("Growth terms"):
     st.markdown(
         f"""
-        - **Revenue growth (YoY)** - sales vs the same quarter last year (yfinance trailing basis).
-        - **Profit growth 1Y / 3Y** - net income latest fiscal year vs prior year, and its
-          3-yr CAGR. Requires both years profitable (growth from a loss base is meaningless).
-        - **EPS growth** - profit ÷ shares outstanding. Similar to profit growth but also
-          moves with buybacks/issuance.
-        - **Breadth (% growing)** - share of companies *with data* whose metric rose.
-          Breadth says how widespread growth is; the median says how fast the typical grower is.
-        - **Nominal vs real** - all figures are nominal rupees. Subtracting ~{INFLATION:.0f}%
-          inflation gives *real* growth - the "+14% sales" you read is roughly "+9% real".
+        - **Revenue growth (YoY)** - sales vs same quarter last year (trailing). Compare vs own 3Y median growth and vs Nifty 50 revenue breadth.
+        - **Profit growth 1Y / 3Y** - net income YoY and 3-yr CAGR (needs both years profitable).
+        - **EPS growth** - profit ÷ shares. Same vs-history and vs-peer lens as valuations.
+        - **Breadth (% growing)** - share with data that rose — vs history breadth and vs Nifty 50 breadth.
+        - **Nominal vs real** - subtract ~{INFLATION:.0f}% inflation: "+14% sales" ≈ "+9% real". Real growth is judged vs 0% and vs peer real growth.
         """
     )
 
@@ -160,12 +138,11 @@ with st.expander("Assumptions in force right now"):
         f"""
         | Assumption | Value | Where used |
         |---|---|---|
-        | Risk-free (10Y G-Sec) | {RISK_FREE_RATE:.1f}% | Earnings-yield comparison, Verdict |
-        | Required return | {REQUIRED_RETURN:.0f}% | Needed growth, margin of safety |
-        | Inflation anchor | {INFLATION:.0f}% | Nominal → real conversions |
-        | Equity premium | {EQUITY_PREMIUM:.0f} pp | Context for how demanding the hurdle is |
+        | Inflation anchor | {INFLATION:.0f}% | Nominal → real growth (EPS − infl) |
+        | Overvalued threshold | +20% vs 5Y median / 80th %ile | Valuation vs history |
+        | Peer premium threshold | +25% vs Nifty 50 | Valuation vs Nifty 50 |
+        | History window | 5Y daily P/E,P/B (NSE, synthetic seed) | All vs-history verdicts |
 
-        Change these in `src/config.py`; every verdict updates on reload.
-        Update the G-Sec value manually from RBI publications before major reviews.
+        Change thresholds in `src/analytics.py` (`_hist_context` / `market_verdict`). History files: `data/index_pepb/nifty_*.csv` — will be replaced by live NSE fetch when available.
         """
     )

@@ -44,60 +44,64 @@ if len(sec):
         tone,
     )
 
-# --- dispersion view -------------------------------------------------------
-metric = st.radio(
-    "Distribution of",
-    ["1Y Return (%)", "3Y CAGR (%)", "EPS Growth 3Y (%)", "Revenue Growth (%)"],
-    horizontal=True,
-)
-
-d = df[["Sector", metric]].dropna()
-medians = d.groupby("Sector")[metric].median().sort_values(ascending=False)
-sector_order = medians.index.tolist()[::-1]  # best median at top
-
-fig = go.Figure(
-    go.Box(
-        x=d[metric],
-        y=d["Sector"],
-        orientation="h",
-        boxpoints="outliers",
-        marker_color="#2563EB",
-        line_color="#0F172A",
-        fillcolor="rgba(37, 99, 235, 0.25)",
-    )
-)
-fig.add_vline(x=0, line_width=1.2, line_dash="dash", line_color="#94A3B8")
-fig.update_layout(
-    height=max(440, 36 * len(sector_order)),
-    margin=dict(l=10, r=10, t=10, b=10),
-    xaxis=dict(title=f"{metric} distribution per sector", zeroline=False),
-    yaxis=dict(categoryorder="array", categoryarray=sector_order, automargin=True),
-    template="plotly_white",
-)
-st.plotly_chart(fig, width="stretch")
-st.caption(f"Sectors ordered by median {metric}. Boxes span p25-p75; whiskers 1.5x IQR; dots are outliers.")
-
-st.divider()
-
-# --- sector table (medians + breadth) ---------------------------------------
-st.markdown('<div class="section-title">All Sectors (medians & breadth)</div>', unsafe_allow_html=True)
+# --- sector table (medians & breadth) — now the hero, tabular first --------
+st.markdown('<div class="section-title">All Sectors — valuations (P/E, P/B) + growth + breadth</div>', unsafe_allow_html=True)
+st.caption("Valuations use **P/E (trailing) and P/B** vs peers — sortable table. Distribution view is in the tab below.")
 st.dataframe(
     sec.reset_index(),
     hide_index=True,
     width="stretch",
+    height=520,
     column_config={
-        "Companies": st.column_config.NumberColumn(format="%d"),
-        "Market Cap (Cr)": st.column_config.NumberColumn(format="%.0f"),
-        "Weight (%)": st.column_config.NumberColumn(format="%.1f%%"),
-        "Median P/E": st.column_config.NumberColumn(format="%.1fx"),
-        "Median EPS Growth 3Y (%)": st.column_config.NumberColumn(format="%+.1f%%"),
-        "Median 1Y Return (%)": st.column_config.NumberColumn(format="%+.1f%%"),
+        "Companies": st.column_config.NumberColumn(format="%d", width="small"),
+        "Market Cap (Cr)": st.column_config.NumberColumn(format="%.0f", width="small"),
+        "Weight (%)": st.column_config.NumberColumn(format="%.1f%%", width="small"),
+        "Median P/E": st.column_config.NumberColumn(format="%.1fx", width="small"),
+        "Median P/B": st.column_config.NumberColumn(format="%.1fx", width="small"),
+        "Median EPS Growth 3Y (%)": st.column_config.NumberColumn(format="%+.1f%%", width="medium"),
+        "Median 1Y Return (%)": st.column_config.NumberColumn(format="%+.1f%%", width="medium"),
         "% Positive (1Y)": st.column_config.ProgressColumn(
-            "Breadth (% Positive)", min_value=0, max_value=100, format="%.0f%%"
+            "Breadth (% Positive)", min_value=0, max_value=100, format="%.0f%%", width="medium"
         ),
-        "1Y Return IQR (pp)": st.column_config.NumberColumn(format="%.0f"),
+        "1Y Return IQR (pp)": st.column_config.NumberColumn(format="%.0f", width="small"),
     },
 )
+st.caption("Tip: click header to sort, use toolbar search. P/E is trailing; P/B is price-to-book — together they catch cheap-but-profitable vs cheap-but-distressed.")
+st.download_button("Download sector table (CSV)", sec.reset_index().to_csv(index=False).encode("utf-8"), "sector_table.csv", "text/csv")
+
+tab_table, tab_dist = st.tabs(["Details", "Distribution"])
+with tab_dist:
+    metric = st.radio(
+        "Distribution of",
+        ["1Y Return (%)", "3Y CAGR (%)", "EPS Growth 3Y (%)", "Revenue Growth (%)"],
+        horizontal=True,
+    )
+    d = df[["Sector", metric]].dropna()
+    medians = d.groupby("Sector")[metric].median().sort_values(ascending=False)
+    sector_order = medians.index.tolist()[::-1]
+    fig = go.Figure(
+        go.Box(
+            x=d[metric],
+            y=d["Sector"],
+            orientation="h",
+            boxpoints="outliers",
+            marker_color="#2563EB",
+            line_color="#0F172A",
+            fillcolor="rgba(37, 99, 235, 0.25)",
+        )
+    )
+    fig.add_vline(x=0, line_width=1.2, line_dash="dash", line_color="#94A3B8")
+    fig.update_layout(
+        height=max(440, 36 * len(sector_order)),
+        margin=dict(l=10, r=10, t=10, b=10),
+        xaxis=dict(title=f"{metric} distribution per sector", zeroline=False),
+        yaxis=dict(categoryorder="array", categoryarray=sector_order, automargin=True),
+        template="plotly_white",
+    )
+    st.plotly_chart(fig, width="stretch")
+    st.caption(f"Sectors ordered by median {metric}. Boxes span p25-p75; whiskers 1.5x IQR; dots are outliers.")
+with tab_table:
+    st.caption("Details tab holds the drill-down below.")
 
 st.divider()
 
